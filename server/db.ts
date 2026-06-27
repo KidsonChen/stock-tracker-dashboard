@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { ENV } from "./_core/env";
+import type { User } from "../drizzle/schema";
 
 export type Watchlist = {
   id: number;
@@ -218,12 +219,26 @@ export async function fetchAndCacheStockData(symbol: string): Promise<void> {
   ]);
 }
 
-export async function getUserByOpenId(_openId: string): Promise<null> {
-  return null;
+export async function getUserByOpenId(
+  _openId: string
+): Promise<User | null> {
+  const { data } = await getSupabase()
+    .from("users")
+    .select("*")
+    .eq("openId", _openId)
+    .maybeSingle();
+
+  return (data as User | null) ?? null;
 }
 
-export async function upsertUser(_user: unknown): Promise<null> {
-  return null;
+export async function upsertUser(_user: Partial<User>): Promise<User | null> {
+  const { data } = await getSupabase()
+    .from("users")
+    .upsert(_user)
+    .select("*")
+    .maybeSingle();
+
+  return (data as User | null) ?? null;
 }
 
 export async function saveAnalysisCache(
