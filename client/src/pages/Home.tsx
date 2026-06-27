@@ -1,0 +1,249 @@
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ChevronLeft, ChevronRight, Plus, Trash2, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { StockChart } from "@/components/StockChart";
+import { StreamingAnalysis } from "@/components/StreamingAnalysis";
+import { useStockQuote, useStockHistory } from "@/hooks/useStockData";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+
+interface WatchlistItem {
+  id: number;
+  symbol: string;
+  addedAt: Date;
+  updatedAt: Date;
+}
+
+export default function Home() {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [stockInput, setStockInput] = useState("");
+  const [selectedStock, setSelectedStock] = useState<string | null>(null);
+  const [timeframe, setTimeframe] = useState("1D");
+  const [chartType, setChartType] = useState("line");
+
+  const { data: watchlistData, isLoading: watchlistLoading, refetch: refetchWatchlist } = trpc.watchlist.list.useQuery();
+
+  const addMutation = trpc.watchlist.add.useMutation({
+    onSuccess: () => {
+      refetchWatchlist();
+      setStockInput("");
+      toast.success("股票已新增到追蹤清單");
+    },
+    onError: (error) => {
+      toast.error(`新增失敗: ${error.message}`);
+    },
+  });
+
+  const removeMutation = trpc.watchlist.remove.useMutation({
+    onSuccess: () => {
+      refetchWatchlist();
+      toast.success("股票已從追蹤清單移除");
+    },
+    onError: (error) => {
+      toast.error(`移除失敗: ${error.message}`);
+    },
+  });
+
+  const watchlist = (watchlistData as WatchlistItem[]) || [];
+  const currentStock = selectedStock || watchlist[0]?.symbol;
+
+  const { quote, isLoading: quoteLoading, error: quoteError } = useStockQuote(currentStock);
+  const { data: chartData, isLoading: historyLoading, error: historyError } = useStockHistory(currentStock);
+
+  const handleAddStock = async () => {
+    if (stockInput.trim()) {
+      await addMutation.mutateAsync({ symbol: stockInput.toUpperCase() });
+      setSelectedStock(stockInput.toUpperCase());
+    }
+  };
+
+  const handleRemoveStock = async (symbol: string) => {
+    await removeMutation.mutateAsync({ symbol });
+    if (selectedStock === symbol) {
+      setSelectedStock(watchlist.length > 1 ? watchlist[0].symbol : null);
+    }
+  };
+
+  if (!currentStock) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6">
+        <div className="text-foreground text-3xl neon-glow font-bold">[ 股市追蹤儀表板 ]</div>
+        <p className="text-muted-foreground text-lg">請在左側新增股票以開始追蹤</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background text-foreground flex overflow-hidden">
+      <div
+        className={`transition-all duration-300 ease-in-out flex flex-col border-r border-border ${
+          sidebarOpen ? "w-64" : "w-0"
+        } overflow-hidden`}
+      >
+        <div className="p-4 border-b border-border">
+          <div className="text-sm font-bold neon-glow mb-4">[ 追蹤清單 ]</div>
+          <div className="flex gap-2">
+            <Input
+              placeholder="股票代號..."
+              value={stockInput}
+              onChange={(e) => setStockInput(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && handleAddStock()}
+              className="bg-input text-foreground placeholder-muted-foreground border-border text-xs"
+            />
+            <Button
+              onClick={handleAddStock}
+              size="sm"
+              disabled={addMutation.isPending}
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {watchlistLoading ? (
+            <div className="text-xs text-muted-foreground p-2">[ 載入中... ]</div>
+          ) : watchlist.length === 0 ? (
+            <div className="text-xs text-muted-foreground p-2">[ 無追蹤股票 ]</div>
+          ) : (
+            watchlist.map((stock) => (
+              <div
+                key={stock.id}
+                onClick={() => setSelectedStock(stock.symbol)}
+                className={`p-3 rounded cursor-pointer transition-colors border ${
+                  selectedStock === stock.symbol
+                    ? "bg-card border-primary text-primary"
+                    : "bg-transparent border-border hover:bg-card/50"
+                }`}
+              >
+                <div className="flex justify-between items-start mb-1">
+                  <span className="font-bold text-sm">{stock.symbol}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveStock(stock.symbol);
+                    }}
+                    disabled={removeMutation.isPending}
+                    className="text-destructive hover:text-destructive/80 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+                {selectedStock === stock.symbol && quote && (
+                  <>
+                    <div className="text-xs text-muted-foreground">${quote.currentPrice.toFixed(2)}</div>
+                    <div
+                      className={`text-xs font-semibold flex items-center gap-1 ${
+                        quote.change >= 0 ? "text-chart-1" : "text-destructive"
+                      }`}
+                    >
+                      {quote.change >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      {quote.change >= 0 ? "+" : ""}{quote.change.toFixed(2)} ({quote.changePercent.toFixed(2)}%)
+                    </div>
+                  </>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="border-b border-border p-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="text-primary hover:text-primary/80 transition-colors"
+            >
+              {sidebarOpen ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+            </button>
+            {currentStock && quote ? (
+              <div>
+                <h1 className="text-2xl font-bold neon-glow">{currentStock}</h1>
+                <p className="text-xs text-muted-foreground">
+                  ${quote.currentPrice.toFixed(2)} {quote.change >= 0 ? "+" : ""}
+                  {quote.change.toFixed(2)} ({quote.changePercent.toFixed(2)}%)
+                </p>
+              </div>
+            ) : (
+              <div className="text-muted-foreground">[ 載入中... ]</div>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            [ {new Date().toLocaleString("zh-TW")} ]
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          {(quoteError || historyError) && (
+            <Card className="bg-destructive/10 border-destructive p-4">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="w-5 h-5" />
+                <span className="text-sm">{quoteError || historyError}</span>
+              </div>
+            </Card>
+          )}
+
+          <Card className="bg-card border-border p-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">[ 股價走勢 ]</h2>
+              <div className="flex gap-2">
+                <Tabs value={timeframe} onValueChange={setTimeframe} className="w-auto">
+                  <TabsList className="bg-input border-border">
+                    {["1D", "1W", "1M", "3M", "1Y"].map((tf) => (
+                      <TabsTrigger key={tf} value={tf} className="text-xs">
+                        {tf}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+                <Tabs value={chartType} onValueChange={setChartType} className="w-auto">
+                  <TabsList className="bg-input border-border">
+                    <TabsTrigger value="line" className="text-xs">
+                      折線
+                    </TabsTrigger>
+                    <TabsTrigger value="candlestick" className="text-xs">
+                      K線
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
+            </div>
+            <StockChart
+              data={chartData}
+              symbol={currentStock}
+              chartType={chartType as "line" | "candlestick"}
+              timeframe={timeframe}
+              isLoading={historyLoading}
+            />
+          </Card>
+
+          {quote && (
+            <Card className="bg-card border-border p-4">
+              <h2 className="text-lg font-bold mb-4">[ 基本資料 ]</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: "開盤價", value: "$" + quote.open.toFixed(2) },
+                  { label: "收盤價", value: "$" + quote.currentPrice.toFixed(2) },
+                  { label: "最高價", value: "$" + quote.high.toFixed(2) },
+                  { label: "最低價", value: "$" + quote.low.toFixed(2) },
+                ].map((item) => (
+                  <div key={item.label} className="border border-border rounded p-3 bg-background">
+                    <div className="text-xs text-muted-foreground mb-1">{item.label}</div>
+                    <div className="text-lg font-bold text-primary">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          <StreamingAnalysis symbol={currentStock} />
+        </div>
+      </div>
+    </div>
+  );
+}

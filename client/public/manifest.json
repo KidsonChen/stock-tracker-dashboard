@@ -1,0 +1,49 @@
+{
+  "name": "股市追蹤儀表板",
+  "short_name": "股市追蹤",
+  "description": "黑色科技感股市追蹤儀表板，支援台股美股即時行情、AI 趨勢分析、均線分析",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0F0F0F",
+  "theme_color": "#0F0F0F",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%230F0F0F' width='192' height='192'/><text x='50%' y='50%' font-size='80' font-weight='bold' fill='%2300FF88' text-anchor='middle' dominant-baseline='middle' font-family='monospace'>$</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%230F0F0F' width='512' height='512'/><text x='50%' y='50%' font-size='200' font-weight='bold' fill='%2300FF88' text-anchor='middle' dominant-baseline='middle' font-family='monospace'>$</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "productivity"],
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%230F0F0F' width='540' height='720'/><text x='50%' y='50%' font-size='60' fill='%2300FF88' text-anchor='middle' dominant-baseline='middle' font-family='monospace'>股市追蹤</text></svg>",
+      "sizes": "540x720",
+      "type": "image/svg+xml",
+      "form_factor": "narrow"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "新增股票",
+      "short_name": "新增",
+      "description": "快速新增股票到追蹤清單",
+      "url": "/?action=add",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%230F0F0F' width='192' height='192'/><text x='50%' y='50%' font-size='80' font-weight='bold' fill='%2300FF88' text-anchor='middle' dominant-baseline='middle' font-family='monospace'>+</text></svg>",
+          "sizes": "192x192",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}

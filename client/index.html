@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-TW">
+
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta name="description" content="黑色科技感股市追蹤儀表板，支援台股美股即時行情、AI 趨勢分析、均線分析" />
+    <meta name="theme-color" content="#0F0F0F" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="股市追蹤" />
+    
+    <title>股市追蹤儀表板</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%230F0F0F' width='192' height='192'/><text x='50%' y='50%' font-size='80' font-weight='bold' fill='%2300FF88' text-anchor='middle' dominant-baseline='middle' font-family='monospace'>$</text></svg>" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%230F0F0F' width='192' height='192'/><text x='50%' y='50%' font-size='80' font-weight='bold' fill='%2300FF88' text-anchor='middle' dominant-baseline='middle' font-family='monospace'>$</text></svg>" />
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // 註冊 Service Worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {
+            // Service Worker 註冊失敗，但應用仍可正常運作
+          });
+        });
+      }
+    </script>
+    <script
+      defer
+      src="%VITE_ANALYTICS_ENDPOINT%/umami"
+      data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+  </body>
+
+</html>

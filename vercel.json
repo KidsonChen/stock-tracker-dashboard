@@ -1,0 +1,13 @@
+{
+  "build": {
+    "env": {
+      "NODE_ENV": "production"
+    }
+  },
+  "framework": null,
+  "regions": ["iad1"],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.ts" },
+    { "src": "/(.*)", "dest": "/dist/public/$1" }
+  ]
+}
