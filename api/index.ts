@@ -26,7 +26,7 @@ if (fs.existsSync(distPath)) {
 }
 
 export const config = {
-  runtime: "nodejs22",
+  runtime: "nodejs",
   regions: ["iad1"],
 };
 
