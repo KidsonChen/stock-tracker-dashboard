@@ -1,70 +1,86 @@
 # 股市追蹤儀表板 (Stock Tracker Dashboard)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+一個功能完整的股票追蹤儀表板，提供即時報價、互動式圖表、移動平均線（MA）技術分析，以及 AI 智慧串流分析功能。
 
-一個功能完整的股票追蹤儀表板，提供即時報價、互動式圖表、移動平均線分析，以及 AI 智慧分析功能。
-
-![儀表板預覽](https://via.placeholder.com/800x400?text=Stock+Tracker+Dashboard)
+介面參考: https://manus.im/app/pUk2KPAxw3STDfEOrYPgnd
 
 ## ✨ 功能特色
 
-- **📊 即時報價**：追蹤股票最新價格、漲跌幅度與成交量
+- **📊 即時報價**：追蹤股票最新價格、漲跌幅度與成交量（台股走 TWSE 即時 API）
 - **📈 互動式圖表**：支援折線圖與 K 線圖，切換不同時間週期 (1D/1W/1M/3M/1Y)
-- **📉 移動平均線**：自訂顯示 5/10/20/50/200 日均線
-- **🤖 AI 智慧分析**：串流式股票分析報告，結合 OpenAI 技術
-- **🔐 OAuth 登入**：安全的第三方認證機制
-- **🌙 深色模式**：支援淺色/深色主題切換
+- **📉 移動平均線**：自訂顯示 5/10/20/50/200 日均線，並標注黃金/死亡交叉信號
+- **🤖 AI 智慧分析**：串流式股票分析報告（技術面 + 基本面），可透過 Router AI / OpenRouter 選擇不同模型
+- **🌙 深色模式**：黑色科技感主題，支援淺色/深色切換
 - **📱 響應式設計**：完美支援桌面與行動裝置
+- **🗄 零配置資料庫**：預設使用本地 DuckDB 檔案（`data/stock.db`），免伺服器、免 API key
 
 ## 🛠 技術架構
 
 | 類別 | 技術選型 |
 |------|----------|
 | **前端框架** | React 19 + TypeScript |
-| **建構工具** | Vite |
+| **建構工具** | Vite 7 |
 | **UI 元件庫** | Radix UI + Tailwind CSS |
 | **圖表繪製** | Recharts |
-| **API 層** | tRPC |
+| **API 層** | tRPC（Express adapter） |
 | **狀態管理** | TanStack React Query |
-| **後端框架** | Express.js |
-| **資料庫** | MySQL + Drizzle ORM |
-| **AI 分析** | OpenAI GPT-4 |
-| **股票資料** | Finnhub + FinMind/TWSE |
-| **雲端部署** | Supabase + Vercel |
+| **後端框架** | Node.js + Express |
+| **資料庫（預設）** | DuckDB（本地內嵌，檔案 `data/stock.db`） |
+| **資料庫（舊版）** | Supabase (PostgreSQL) — 保留 `supabase/seed.sql` 供參考 |
+| **AI 分析** | Router AI（`routerai.net`），回退 OpenRouter / Forge，多模型串流 |
+| **股票資料** | 台灣證券交易所 TWSE 即時 API（主）；Finnhub / FinMind 客戶端保留備用 |
+| **雲端部署** | Vercel（serverless，已附 `vercel.json`） |
 
 ## 📁 專案結構
 
 ```
 stock-tracker-dashboard/
-├── api/                    # Express 伺服器入口
-│   └── index.ts            # API 路由配置
+├── api/
+│   └── index.ts            # Vercel serverless 入口（Express + tRPC + 靜態檔）
 ├── client/                 # React 前端應用
+│   ├── index.html
 │   ├── public/             # 靜態資源
 │   └── src/
 │       ├── components/     # React 元件
-│       │   ├── StockChart.tsx       # 股價圖表
-│       │   ├── StreamingAnalysis.tsx # AI 分析元件
-│       │   └── ui/                  # UI 元件庫
-│       ├── hooks/          # 自訂 Hooks
-│       │   └── useStockData.ts      # 股票資料 hook
+│       │   ├── StockChart.tsx        # 股價圖表（K 線/折線 + MA）
+│       │   ├── StreamingAnalysis.tsx # AI 串流分析
+│       │   ├── AIAnalysisStream.tsx  # AI 分析串流渲染
+│       │   ├── DashboardLayout.tsx   # 主佈局（可隱藏側欄）
+│       │   └── ui/                   # UI 元件庫
+│       ├── hooks/          # 自訂 Hooks（useStockData 等）
 │       ├── lib/            # 工具函式庫
-│       │   └── ma-calculator.ts     # 均線計算器
-│       ├── pages/          # 頁面元件
-│       │   └── Home.tsx             # 主頁面
-│       └── contexts/       # React Context
+│       │   ├── ma-calculator.ts      # 均線計算器
+│       │   └── trpc.ts                # tRPC client
+│       ├── contexts/       # React Context（ThemeContext）
+│       ├── pages/          # 頁面元件（Home / ComponentShowcase / NotFound）
+│       ├── App.tsx
+│       └── main.tsx
 ├── server/                 # 伺服器邏輯
 │   ├── _core/              # 核心設定
+│   │   ├── index.ts        # 自托管 / 開發入口（Vite 熱更新或靜態檔）
 │   │   ├── context.ts      # tRPC Context
-│   │   └── db.ts           # 資料庫連線
-│   ├── routers.ts          # tRPC 路由定義
-│   ├── finnhub.ts          # Finnhub API 整合
-│   ├── twse.ts             # 台灣證券交易所 API
+│   │   ├── env.ts          # 環境變數讀取
+│   │   ├── llm.ts          # AI 後端（Router AI / OpenRouter / Forge）
+│   │   └── trpc.ts         # tRPC 初始化
+│   ├── routers.ts          # tRPC 路由定義（watchlist / quote / candles / analysis）
+│   ├── db-duckdb.ts        # 本地 DuckDB 資料層（目前預設使用）
+│   ├── db.ts               # 舊版 Supabase 資料層（保留相容）
+│   ├── twse-live.ts        # TWSE 即時報價 / K 線
+│   ├── finnhub.ts          # Finnhub API 整合（備用）
+│   ├── finmind.ts          # FinMind API 整合（備用）
 │   ├── llm-stream.ts       # AI 串流分析
-│   └── ma-analysis.ts      # 均線分析邏輯
-├── supabase/               # Supabase 設定
-│   ├── schema.sql          # 資料庫結構
-│   └── seed.sql            # 初始資料
-└── package.json            # 專案依賴配置
+│   ├── ma-analysis.ts      # 均線分析邏輯
+│   └── *.test.ts           # vitest 單元測試
+├── shared/                 # 前後端共用型別與常數
+├── supabase/
+│   └── seed.sql            # 舊版 Supabase 資料庫結構（參考用）
+├── references/             # 各項整合筆記（llm / maps / storage 等）
+├── data/                   # DuckDB 執行期資料（stock.db，gitignore）
+├── drizzle/                # 舊版 Drizzle schema / migrations
+├── vercel.json             # Vercel 部署設定
+├── DEPLOY.md               # Vercel 部署步驟
+├── .env.example            # 環境變數範本
+└── package.json            # 專案依賴與指令
 ```
 
 ## 🚀 快速開始
@@ -72,10 +88,9 @@ stock-tracker-dashboard/
 ### 前置需求
 
 - Node.js 22+
-- pnpm (建議) 或 npm/yarn
-- MySQL 資料庫
-- [Finnhub API Key](https://finnhub.io/)
-- [OpenAI API Key](https://platform.openai.com/)
+- pnpm（建議）或 npm/yarn
+- **（選用）** AI 分析需要 API key：Router AI / OpenRouter / Forge 任一個
+  - 若未設定，儀表板的報價、圖表、均線功能仍可正常使用，僅 AI 分析會停用
 
 ### 安裝步驟
 
@@ -91,94 +106,123 @@ stock-tracker-dashboard/
    ```
 
 3. **環境設定**
-   
-   複製環境變數範本並填入您的 API Keys：
    ```bash
    cp .env.example .env
    ```
-   
-   必要環境變數：
-   ```env
-   # 資料庫
-   DATABASE_URL=mysql://user:password@localhost:3306/stock_tracker
-   
-   # Finnhub API
-   FINNHUB_API_KEY=your_finnhub_api_key
-   
-   # OpenAI
-   OPENAI_API_KEY=your_openai_api_key
-   
-   # OAuth (可選)
-   VITE_OAUTH_PORTAL_URL=https://your-oauth-portal.com
-   VITE_APP_ID=your_app_id
-   ```
+   預設情況下**不需**任何 key 即可啟動（資料庫用本地 DuckDB）。
+   若要啟用 AI 分析，至少在 `.env` 填入 `ROUTER_AI_API_KEY`。
 
-4. **資料庫設定**
-   
-   建立 Supabase 專案並執行 SQL：
-   ```bash
-   # 在 Supabase SQL Editor 中執行
-   supabase/seed.sql
-   ```
-
-5. **啟動開發伺服器**
+4. **啟動開發伺服器**
    ```bash
    pnpm dev
    ```
+   伺服器會自動尋找可用 port（預設從 `3000` 起），並在終端機印出實際網址。
 
-6. **開啟瀏覽器**
+5. **開啟瀏覽器**
    ```
-   http://localhost:5173
+   http://localhost:3000   （或終端機顯示的實際 port）
    ```
 
 ### 建構生產版本
 
 ```bash
-pnpm build
-pnpm start
+pnpm build      # vite build 前端 + esbuild bundle 後端到 dist/
+pnpm start      # 以 production 模式啟動（NODE_ENV=production，提供 dist/public 靜態檔）
 ```
+
+## 🔧 環境變數
+
+複製自 `.env.example`，可依需求調整：
+
+| 變數 | 說明 | 預設 |
+|------|------|------|
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | 舊版 Supabase 後端（目前預設未使用） | — |
+| `ROUTER_AI_API_KEY` | Router AI / OpenRouter / Forge 的 API key（啟用 AI 分析必填） | — |
+| `ROUTER_AI_BASE_URL` | AI 後端基礎網址 | `https://openrouter.ai/api/v1` |
+| `ROUTER_AI_MODEL` | 指定的 AI 模型 | `openrouter/auto` |
+| `FORGE_API_KEY` / `FORGE_API_URL` | 舊版 Manus/Forge 後端（選用回退） | — |
+| `NODE_ENV` | `development` / `production` | `production` |
+| `PORT` | 伺服器偏好 port（佔用時自動往後找） | `3000` |
+
+> AI 後端優先順序（`server/_core/llm.ts`）：`ROUTER_AI_BASE_URL` → `FORGE_API_URL` → `https://openrouter.ai/api/v1`。
+
+## 🗄 資料庫
+
+- **預設：本地 DuckDB**（`server/db-duckdb.ts`）
+  - 單一檔案嵌入式資料庫，路徑 `data/stock.db`（不存在會自動建表）。
+  - 零伺服器、零 API key，最適合本地開發與自托管。
+  - 儲存三張表：`watchlist`、`stock_data`、`analysis_cache`。
+- **舊版：Supabase**（`server/db.ts` + `supabase/seed.sql`）
+  - 早期版本使用 Supabase PostgreSQL，現已改為 DuckDB；`supabase/seed.sql` 保留供參考與自行架設 Supabase 時使用。
+  - 若要切回 Supabase，需將 `server/routers.ts` 的 import 由 `./db-duckdb` 改回 `./db` 並設定 `SUPABASE_URL` / `SUPABASE_ANON_KEY`。
+
+## 📈 股票資料來源
+
+- **台股（主路徑）**：`server/twse-live.ts` 串接台灣證券交易所公開 API，取得即時報價與歷史 K 線。
+- **美股 / 其他（備用客戶端）**：`server/finnhub.ts`、`server/finmind.ts` 已整合，可依需求在 `server/routers.ts` 中切換。
+- 取得的資料會快取進 DuckDB（`stock_data` 表，預設 24 小時過期）以降低外部 API 呼叫。
+
+## 🤖 AI 分析
+
+- 後端：`server/_core/llm.ts` 統一呼叫 OpenAI 相容介面，串流回傳。
+- 報告由 `server/llm-stream.ts` 產生（技術面 + 基本面），前端 `StreamingAnalysis.tsx` / `AIAnalysisStream.tsx` 逐步渲染。
+- 分析結果快取於 `analysis_cache` 表，可重新生成。
+
+## ☁️ 部署（Vercel）
+
+`vercel.json` 已設定路由：`/api/*` 導向 `api/index.ts`，其餘導向 `dist/public` 靜態檔。
+
+```bash
+# 1. 建構
+pnpm build
+
+# 2. 登入並部署
+npx vercel login
+npx vercel
+```
+
+詳細步驟見 [DEPLOY.md](DEPLOY.md)。部署前請在 Vercel 專案環境變數中設定 `ROUTER_AI_API_KEY` 等。
 
 ## 📖 使用說明
 
 ### 新增股票
-
-1. 在左側側邊欄的輸入框輸入股票代號
+1. 在左側側邊欄的輸入框輸入股票代號（如 `2330`）
 2. 按下 `+` 按鈕或 Enter 鍵
-3. 股票即會加入追蹤清單
+3. 股票即會加入追蹤清單（存入 DuckDB）
 
 ### 圖表操作
-
 - **時間週期**：點擊 1D/1W/1M/3M/1Y 切換不同週期
 - **圖表類型**：切換折線圖或 K 線圖
-- **均線顯示**：點擊 MA 按鈕顯示/隱藏均線
+- **均線顯示**：點擊 MA 按鈕顯示/隱藏 5/10/20/50/200 日均線
 
 ### AI 分析
-
 選擇股票後，下方會顯示 AI 生成的股票分析報告，透過串流方式即時呈現。
 
 ## 🔧 可用指令
 
 | 指令 | 說明 |
 |------|------|
-| `pnpm dev` | 啟動開發伺服器 |
-| `pnpm build` | 建構生產版本 |
+| `pnpm dev` | 啟動開發伺服器（Vite HMR + 自動找 port） |
+| `pnpm build` | 建構生產版本（前端 + 後端 bundle） |
 | `pnpm start` | 啟動生產伺服器 |
-| `pnpm check` | 執行 TypeScript 檢查 |
-| `pnpm format` | 格式化程式碼 |
-| `pnpm test` | 執行測試 |
-| `pnpm db:push` | 同步資料庫結構 |
+| `pnpm check` | 執行 TypeScript 類型檢查 |
+| `pnpm format` | Prettier 格式化程式碼 |
+| `pnpm test` | 執行 vitest 單元測試 |
+| `pnpm db:push` | 舊版 Drizzle 結構同步（Supabase 用） |
 
 ## 📦 主要依賴
 
+- **react / react-dom** (19) - 前端框架
 - **@radix-ui/react-*** - 無樣式可存取性元件
 - **@tanstack/react-query** - 伺服器狀態管理
-- **@trpc/server/client** - 型別安全 API
+- **@trpc/server / @trpc/client** - 型別安全 API
 - **recharts** - 圖表繪製
-- **framer-motion** - 動畫效果
-- **lucide-react** - 圖示庫
-- **drizzle-orm** - ORM 資料庫操作
 - **express** - 後端框架
-- **openai** - OpenAI API 整合
+- **duckdb** - 本地內嵌資料庫
+- **@supabase/supabase-js** - 舊版 PostgreSQL 客戶端（保留）
+- **drizzle-orm** - 舊版 ORM（保留）
+- **tailwindcss** - 樣式
+- **vite / vitest** - 建構與測試
 
 ## 🤝 貢獻指南
 
@@ -196,7 +240,8 @@ pnpm start
 
 ## 🙏 致謝
 
-- [Finnhub](https://finnhub.io/) - 股票資料 API
-- [OpenAI](https://openai.com/) - AI 分析能力
-- [Supabase](https://supabase.com/) - 資料庫與部署平台
+- [台灣證券交易所 (TWSE)](https://www.twse.com.tw/) - 台股即時資料 API
+- [Finnhub](https://finnhub.io/) / [FinMind](https://finmind.github.io/) - 備用股票資料 API
+- [OpenRouter](https://openrouter.ai/) / Router AI - AI 分析能力
+- [Supabase](https://supabase.com/) - 舊版資料庫參考
 - [Radix UI](https://www.radix-ui.com/) - UI 元件庫

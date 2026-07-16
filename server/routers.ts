@@ -9,9 +9,8 @@ import {
   getAnalysisCache,
   saveAnalysisCache,
   isCacheExpired,
-  getStockQuote,
-  fetchAndCacheStockData,
-} from "./db";
+} from "./db-duckdb";
+import { getTWSECandles, getTWSEQuote } from "./twse-live";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
 import { streamDetailedAnalysis } from "./llm-stream";
@@ -67,21 +66,21 @@ export const appRouter = router({
       .input(z.object({ symbol: z.string().min(1).max(10) }))
       .query(async ({ input }) => {
         try {
-          const quote = await getStockQuote(input.symbol);
+          const quote = await getTWSEQuote(input.symbol);
           return {
             symbol: input.symbol.toUpperCase(),
-            currentPrice: quote.c,
-            open: quote.o,
-            high: quote.h,
-            low: quote.l,
-            previousClose: quote.pc,
-            timestamp: quote.t,
+            currentPrice: quote.currentPrice,
+            open: quote.open,
+            high: quote.high,
+            low: quote.low,
+            previousClose: quote.previousClose,
+            timestamp: quote.timestamp,
           };
         } catch (error) {
           console.error("[Stock] Failed to fetch quote:", error);
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to fetch stock quote",
+            message: `無法取得 ${input.symbol} 報價（證交所無資料）`,
           });
         }
       }),
@@ -90,27 +89,26 @@ export const appRouter = router({
       .input(z.object({ symbol: z.string().min(1).max(10) }))
       .query(async ({ input }) => {
         try {
-          const isExpired = await isCacheExpired(input.symbol);
-
-          if (isExpired) {
-            await fetchAndCacheStockData(input.symbol);
+          const candles = await getTWSECandles(input.symbol, 120);
+          if (!candles.length) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: `無法取得 ${input.symbol} 歷史資料`,
+            });
           }
-
-          const data = await getStockDataBySymbol(input.symbol);
-
-          return data.map((row) => ({
-            date: row.date,
-            open: Number(row.open),
-            high: Number(row.high),
-            low: Number(row.low),
-            close: Number(row.close),
-            volume: Number(row.volume),
+          return candles.map((c) => ({
+            date: c.date,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+            volume: Number(c.volume),
           }));
         } catch (error) {
           console.error("[Stock] Failed to fetch history:", error);
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to fetch stock history",
+            message: `無法取得 ${input.symbol} 歷史資料`,
           });
         }
       }),
@@ -126,15 +124,22 @@ export const appRouter = router({
             return { result: cached.result, fromCache: true };
           }
 
-          const quote = await getStockQuote(input.symbol);
-          const history = await getStockDataBySymbol(input.symbol, 30);
+          const quote = await getTWSEQuote(input.symbol);
+          const history = await getTWSECandles(input.symbol, 30);
+
+          if (!process.env.ROUTER_AI_API_KEY) {
+            return {
+              result: `【技術面】${input.symbol} 最新價 $${quote.currentPrice}（開 $${quote.open} / 高 $${quote.high} / 低 $${quote.low}）。\n⚠️ 未配置 ROUTER_AI_API_KEY，AI 分析已停用。請於 .env 設定後重啟以啟用自然語言分析。`,
+              fromCache: false,
+            };
+          }
 
           const prompt = `請分析股票 ${input.symbol}。
-當前價格: $${quote.c}
-開盤價: $${quote.o}
-最高價: $${quote.h}
-最低價: $${quote.l}
-前收盤價: $${quote.pc}
+當前價格: $${quote.currentPrice}
+開盤價: $${quote.open}
+最高價: $${quote.high}
+最低價: $${quote.low}
+前收盤價: $${quote.previousClose}
 
 請提供簡潔的技術面和基本面分析，以及未來 1-3 個月的走勢預測。`;
 
