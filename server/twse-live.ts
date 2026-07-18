@@ -6,6 +6,9 @@
 
 const BASE = "https://www.twse.com.tw/exchangeReport";
 
+// 台股歷史日線走 Yahoo（與美股/港股統一來源，免 key、1Y 穩定）
+import { getYahooCandles } from "./yahoo";
+
 export interface TWSECandle {
   date: string; // YYYY/MM/DD 民國格式 -> 轉西元
   open: number;
@@ -55,29 +58,33 @@ async function fetchMonth(symbol: string, yyyymm: string): Promise<TWSECandle[]>
 }
 
 /**
- * 抓最近 N 天日 K 線（跨月自動併接）
+ * 抓最近 N 天日 K 線（台股歷史）。
+ *
+ * 改用 Yahoo Finance（與美股/港股統一來源，免 key、1Y 資料完整穩定）。
+ * 證交所 STOCK_DAY 只回當月、FinMind 免費 API 又不穩（常限流導致退化成當月），
+ * 故台股歷史也走 Yahoo（代號補 .TW，如 2330 -> 2330.TW）。
+ * 若 Yahoo 失敗，才 fallback 回證交所當月資料（僅足夠 1M 以內顯示）。
  */
 export async function getTWSECandles(symbol: string, days = 90): Promise<TWSECandle[]> {
-  const now = new Date();
-  const months: string[] = [];
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(
-      `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`
-    );
-  }
-  const all: TWSECandle[] = [];
-  for (const m of months) {
+  const yahooSym = symbol.toUpperCase().endsWith(".TW")
+    ? symbol.toUpperCase()
+    : `${symbol.toUpperCase()}.TW`;
+
+  try {
+    const candles = await getYahooCandles(yahooSym, days);
+    if (candles.length) return candles;
+    throw new Error("Yahoo 無資料");
+  } catch (e) {
+    console.warn(`[TWSE] Yahoo 歷史失敗，fallback 證交所當月:`, (e as Error).message);
     try {
-      const c = await fetchMonth(symbol, m);
-      all.push(...c);
-    } catch (e) {
-      console.warn(`[TWSE] ${m} 抓取失敗:`, (e as Error).message);
+      const d = new Date();
+      const yyyymm = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return await fetchMonth(symbol, yyyymm);
+    } catch (e2) {
+      console.error(`[TWSE] fallback 也失敗:`, (e2 as Error).message);
+      return [];
     }
   }
-  // 由舊到新排序，取最近 N 筆
-  all.sort((a, b) => (a.date < b.date ? -1 : 1));
-  return all.slice(-days);
 }
 
 /**

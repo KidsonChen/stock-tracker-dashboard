@@ -7,6 +7,7 @@ import { Streamdown } from "streamdown";
 
 interface StreamingAnalysisProps {
   symbol: string;
+  market?: string;
 }
 
 interface AnalysisSection {
@@ -15,14 +16,14 @@ interface AnalysisSection {
   isComplete: boolean;
 }
 
-export function StreamingAnalysis({ symbol }: StreamingAnalysisProps) {
+export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [sections, setSections] = useState<AnalysisSection[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
 
   const { data: streamData, isLoading } = trpc.analysis.detailedStream.useQuery(
-    { symbol },
+    { symbol, market: market ?? "TW" },
     { enabled: isAnalyzing }
   );
 

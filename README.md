@@ -158,9 +158,12 @@ pnpm start      # 以 production 模式啟動（NODE_ENV=production，提供 dis
 
 ## 📈 股票資料來源
 
-- **台股（主路徑）**：`server/twse-live.ts` 串接台灣證券交易所公開 API，取得即時報價與歷史 K 線。
-- **美股 / 其他（備用客戶端）**：`server/finnhub.ts`、`server/finmind.ts` 已整合，可依需求在 `server/routers.ts` 中切換。
+- **台股即時報價（主路徑）**：`server/twse-live.ts` 的 `getTWSEQuote` 串接台灣證券交易所 `STOCK_DAY` 公開 API，取得最新收/開/高/低價。
+- **台股歷史 K 線（主路徑）**：`server/twse-live.ts` 的 `getTWSECandles` 走 **FinMind** `TaiwanStockPrice`（免認證、支援任意日期區間），供 1M / 3M / 1Y 圖表使用。`server/finmind.ts` 亦提供同功能客戶端。
+- **美股 / 其他（備用客戶端）**：`server/finnhub.ts` 已整合，可依需求在 `server/routers.ts` 中切換。
 - 取得的資料會快取進 DuckDB（`stock_data` 表，預設 24 小時過期）以降低外部 API 呼叫。
+
+> ⚠️ **證交所 `STOCK_DAY` 行為坑（已踩過）**：TWSE 的 `STOCK_DAY?date=YYYYMM` 現在對**任意月份**都只回傳「當月」資料（實測 `202301`/`202407`/`202501` 全部回 `115年07月`），無法取得真實歷史。因此歷史日線改由 FinMind 提供；若 FinMind 失敗，`getTWSECandles` 會 fallback 回證交所當月資料（僅足夠 1M 以內顯示）。不要再把歷史 K 線來源切回證交所 `STOCK_DAY`。
 
 ## 🤖 AI 分析
 

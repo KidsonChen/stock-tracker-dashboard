@@ -219,7 +219,9 @@ const resolveApiUrl = () => {
         ? ENV.forgeApiUrl
         : "https://openrouter.ai/api/v1";
 
-  return `${base.replace(/\/$/, "")}/v1/chat/completions`;
+  // 避免 /v1/v1/ 路徑
+  const cleanBase = base.replace(/\/v1\/?$/, "");
+  return `${cleanBase}/v1/chat/completions`;
 };
 
 const assertProviderKey = () => {
@@ -373,6 +375,8 @@ const fetchWithBackoff = async (
 };
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
+  console.log("[LLM] invokeLLM called, model param:", params.model);
+  console.log("[LLM] ENV.routerAiModel:", ENV.routerAiModel);
   const apiKey = assertProviderKey();
 
   const {
@@ -434,12 +438,17 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
+  const url = resolveApiUrl();
+  console.log("[LLM] API URL:", url);
+  console.log("[LLM] Payload model:", payload.model);
+  
   const response = await fetchWithBackoff(
-    resolveApiUrl(),
+    url,
     {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "HTTP-Referer": "http://localhost:3001",
       },
       body: JSON.stringify(payload),
     },
@@ -448,6 +457,10 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error("[LLM] API URL:", resolveApiUrl());
+    console.error("[LLM] Model:", resolveModel());
+    console.error("[LLM] Response status:", response.status, response.statusText);
+    console.error("[LLM] Response body:", errorText);
     throw new Error(
       `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
     );

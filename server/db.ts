@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { ENV } from "./_core/env";
 import type { User } from "../drizzle/schema";
+import { formatDateYMD } from "../shared/date";
 
 export type Watchlist = {
   id: number;
@@ -101,7 +102,7 @@ export async function getStockDataBySymbol(symbol: string, limit = 100): Promise
 
   return (data ?? []).map((row) => ({
     symbol: row.symbol as string,
-    date: new Date(row.date as string).toLocaleDateString("zh-TW"),
+    date: formatDateYMD(row.date as string),
     open: Number(row.open ?? 0),
     high: Number(row.high ?? 0),
     low: Number(row.low ?? 0),
@@ -170,37 +171,26 @@ export async function getAnalysisCache(
 }
 
 export async function getStockQuote(symbol: string): Promise<QuoteData> {
-  const res = await fetch(
-    `https://vooagoifysyqfqhmkxcs.supabase.co/rest/v1/rpc/get_stock_quote`,
-    {
-      method: 'POST',
-      headers: {
-        apikey: ENV.supabaseAnonKey,
-        Authorization: `Bearer ${ENV.supabaseAnonKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify({ p_symbol: symbol.toUpperCase() }),
-    }
-  );
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("stockData")
+    .select("*")
+    .eq("symbol", symbol.toUpperCase())
+    .order("cachedAt", { ascending: false })
+    .limit(1)
+    .single();
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch quote for ${symbol}`);
-  }
-
-  const data = await res.json();
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) {
+  if (error || !data) {
     throw new Error(`Quote not found for ${symbol}`);
   }
 
   return {
-    c: Number(row.c ?? row.close ?? 0),
-    h: Number(row.h ?? row.high ?? 0),
-    l: Number(row.l ?? row.low ?? 0),
-    o: Number(row.o ?? row.open ?? 0),
-    pc: Number(row.pc ?? row.previous_close ?? 0),
-    t: Number(row.t ?? 0),
+    c: Number(data.close),
+    h: Number(data.high),
+    l: Number(data.low),
+    o: Number(data.open),
+    pc: Number(data.open), // 使用開盤價作為前收價的近似值
+    t: Math.floor(new Date(data.cachedAt).getTime() / 1000),
   };
 }
 
@@ -209,7 +199,7 @@ export async function fetchAndCacheStockData(symbol: string): Promise<void> {
   await saveStockData([
     {
       symbol: symbol.toUpperCase(),
-      date: new Date().toLocaleDateString('zh-TW'),
+      date: formatDateYMD(new Date()),
       open: quote.o,
       high: quote.h,
       low: quote.l,

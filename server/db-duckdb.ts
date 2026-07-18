@@ -25,10 +25,16 @@ const DATA_DIR = path.resolve(process.cwd(), "data");
 const DB_PATH = process.env.DUCKDB_PATH || path.join(DATA_DIR, "stock.db");
 
 let _db: any = null;
+let _conn: any = null;
 let _initPromise: Promise<any> | null = null;
+// 序列化所有 SQL 執行，避免 duckdb 1.4.4 在並發 statement 時觸發
+// "unique_ptr is NULL" 內部錯誤（單一連線 + 佇列最穩）。
+let _chain: Promise<any> = Promise.resolve();
+// init 完成閘門：確保所有 SQL 都在 _conn 就緒後才執行
+let _ready: Promise<void> | null = null;
 
 export function getDB(): Promise<any> {
-  if (_db) return Promise.resolve(_db);
+  if (_db && _conn && _ready) return Promise.resolve(_db);
   if (_initPromise) return _initPromise;
 
   _initPromise = (async () => {
@@ -39,6 +45,7 @@ export function getDB(): Promise<any> {
         `CREATE TABLE IF NOT EXISTS watchlist (
           id INTEGER PRIMARY KEY,
           symbol VARCHAR NOT NULL,
+          market VARCHAR DEFAULT 'TW',
           addedAt TIMESTAMP DEFAULT now(),
           updatedAt TIMESTAMP DEFAULT now()
         );
@@ -64,43 +71,68 @@ export function getDB(): Promise<any> {
         CREATE SEQUENCE IF NOT EXISTS watchlist_seq START 1;
         CREATE SEQUENCE IF NOT EXISTS stock_data_seq START 1;
         CREATE SEQUENCE IF NOT EXISTS analysis_cache_seq START 1;`,
-        (e) => (e ? reject(e) : resolve())
+        (e: any) => (e ? reject(e) : resolve())
       );
     });
+    // 向後相容：舊資料庫的 watchlist 可能沒有 market 欄，補上（已存在則忽略）
+    try {
+      await new Promise<void>((resolve) => {
+        db.exec(
+          `ALTER TABLE watchlist ADD COLUMN market VARCHAR DEFAULT 'TW'`,
+          () => resolve()
+        );
+      });
+    } catch {
+      // 欄位已存在，忽略
+    }
+    // 建立單一持久連線（不再每次 db.connect() 開新連線）
+    _conn = db.connect();
     _db = db;
+    _ready = Promise.resolve();
     return db;
   })();
 
   return _initPromise;
 }
 
-// ---- callback -> Promise 封裝 ----
+// ---- callback -> Promise 封裝（經由 _chain 嚴格串行，prepare + 展開參數）----
 
-function all<T = any>(db: any, sql: string, params: any[] = []): Promise<T[]> {
-  return new Promise((resolve, reject) => {
-    const conn = db.connect();
-    const stmt = conn.prepare(sql, (e: any) =>
-      e ? reject(e) : null
-    );
-    stmt.all(...params, (e: any, rows: T[]) =>
-      e ? reject(e) : resolve(rows || [])
-    );
+async function withConn<T>(fn: (conn: any) => Promise<T>): Promise<T> {
+  // 確保 init（_conn）完成
+  if (!_conn) await getDB();
+  const task = _chain.then(() => fn(_conn));
+  // 保證鏈不中斷（錯誤也接住，往下走）
+  _chain = task.then(
+    () => undefined,
+    () => undefined
+  );
+  return task;
+}
+
+function all<T = any>(_db: any, sql: string, params: any[] = []): Promise<T[]> {
+  return withConn<T[]>((conn) => {
+    return new Promise<T[]>((resolve, reject) => {
+      const stmt = conn.prepare(sql, (e: any) => (e ? reject(e) : null));
+      stmt.all(...params, (e: any, rows: T[]) =>
+        e ? reject(e) : resolve(rows || [])
+      );
+    });
   });
 }
 
-function run(db: any, sql: string, params: any[] = []): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const conn = db.connect();
-    const stmt = conn.prepare(sql, (e: any) =>
-      e ? reject(e) : null
-    );
-    stmt.run(...params, (e: any) => (e ? reject(e) : resolve()));
+function run(_db: any, sql: string, params: any[] = []): Promise<void> {
+  return withConn<void>((conn) => {
+    return new Promise<void>((resolve, reject) => {
+      const stmt = conn.prepare(sql, (e: any) => (e ? reject(e) : null));
+      stmt.run(...params, (e: any) => (e ? reject(e) : resolve()));
+    });
   });
 }
 
 export type Watchlist = {
   id: number;
   symbol: string;
+  market: string;
   addedAt: string;
   updatedAt: string;
 };
@@ -145,17 +177,29 @@ export async function getWatchlist(): Promise<Watchlist[]> {
   }
 }
 
-export async function addToWatchlist(symbol: string): Promise<Watchlist> {
+export async function addToWatchlist(
+  symbol: string,
+  market = "TW"
+): Promise<Watchlist> {
   const db = await getDB();
   const sym = symbol.toUpperCase();
-  const existing = await all<Watchlist>(db, "SELECT * FROM watchlist WHERE symbol = ?", [sym]);
+  const mkt = (market || "TW").toUpperCase();
+  const existing = await all<Watchlist>(
+    db,
+    "SELECT * FROM watchlist WHERE symbol = ? AND market = ?",
+    [sym, mkt]
+  );
   if (existing.length > 0) return existing[0];
   await run(
     db,
-    "INSERT INTO watchlist (id, symbol, addedAt, updatedAt) VALUES (nextval('watchlist_seq'), ?, now(), now())",
-    [sym]
+    "INSERT INTO watchlist (id, symbol, market, addedAt, updatedAt) VALUES (nextval('watchlist_seq'), ?, ?, now(), now())",
+    [sym, mkt]
   );
-  const row = await all<Watchlist>(db, "SELECT * FROM watchlist WHERE symbol = ?", [sym]);
+  const row = await all<Watchlist>(
+    db,
+    "SELECT * FROM watchlist WHERE symbol = ? AND market = ?",
+    [sym, mkt]
+  );
   return row[0];
 }
 

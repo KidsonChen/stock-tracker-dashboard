@@ -54,9 +54,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
+          // 先 clone 再檢查和使用
+          const clonedResponse = response.clone();
           if (response.ok) {
-            const cache = caches.open(RUNTIME_CACHE);
-            cache.then((c) => c.put(request, response.clone()));
+            caches.open(RUNTIME_CACHE).then((cache) => {
+              cache.put(request, clonedResponse);
+            });
           }
           return response;
         })
@@ -80,9 +83,10 @@ self.addEventListener('fetch', (event) => {
             return response;
           }
 
-          const responseToCache = response.clone();
+          // 先 clone 再快取
+          const clonedResponse = response.clone();
           caches.open(RUNTIME_CACHE).then((cache) => {
-            cache.put(request, responseToCache);
+            cache.put(request, clonedResponse);
           });
 
           return response;

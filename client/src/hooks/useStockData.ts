@@ -13,13 +13,13 @@ export interface StockQuote {
   changePercent: number;
 }
 
-export function useStockQuote(symbol: string | null) {
+export function useStockQuote(symbol: string | null, market?: string) {
   const [quote, setQuote] = useState<StockQuote | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { data, isLoading: queryLoading, error: queryError } = trpc.stock.getQuote.useQuery(
-    { symbol: symbol || "" },
+    { symbol: symbol || "", market: market ?? "TW" },
     { enabled: !!symbol }
   );
 
@@ -58,9 +58,9 @@ export interface ChartData {
   volume: number;
 }
 
-export function useStockHistory(symbol: string | null) {
+export function useStockHistory(symbol: string | null, market?: string) {
   const { data, isLoading, error } = trpc.stock.getHistory.useQuery(
-    { symbol: symbol || "" },
+    { symbol: symbol || "", market: market ?? "TW" },
     { enabled: !!symbol }
   );
 

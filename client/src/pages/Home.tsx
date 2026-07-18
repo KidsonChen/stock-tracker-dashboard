@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { formatDateYMD } from "../../../shared/date";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronLeft, ChevronRight, Plus, Trash2, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { useState } from "react";
@@ -10,17 +11,28 @@ import { useStockQuote, useStockHistory } from "@/hooks/useStockData";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
+type Market = "TW" | "US" | "HK";
+const MARKETS: { value: Market; label: string }[] = [
+  { value: "TW", label: "台股" },
+  { value: "US", label: "美股" },
+  { value: "HK", label: "港股" },
+];
+const marketLabel = (m?: string) =>
+  MARKETS.find((x) => x.value === (m || "TW"))?.label ?? "台股";
+
 interface WatchlistItem {
   id: number;
   symbol: string;
-  addedAt: Date;
-  updatedAt: Date;
+  market: string;
+  addedAt: string;
+  updatedAt: string;
 }
 
 export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [stockInput, setStockInput] = useState("");
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
+  const [selectedMarket, setSelectedMarket] = useState<Market>("TW");
   const [timeframe, setTimeframe] = useState("1D");
   const [chartType, setChartType] = useState("line");
 
@@ -30,7 +42,6 @@ export default function Home() {
     onSuccess: () => {
       refetchWatchlist();
       setStockInput("");
-      toast.success("股票已新增到追蹤清單");
     },
     onError: (error) => {
       toast.error(`新增失敗: ${error.message}`);
@@ -48,15 +59,22 @@ export default function Home() {
   });
 
   const watchlist = (watchlistData as WatchlistItem[]) || [];
-  const currentStock = selectedStock || watchlist[0]?.symbol;
+  const currentItem = watchlist.find(
+    (s) => s.symbol === selectedStock && s.market === (selectedMarket || "TW")
+  );
+  const currentStock = selectedStock || watchlist[0]?.symbol || null;
+  const currentMarket =
+    currentItem?.market || watchlist[0]?.market || "TW";
 
-  const { quote, isLoading: quoteLoading, error: quoteError } = useStockQuote(currentStock);
-  const { data: chartData, isLoading: historyLoading, error: historyError } = useStockHistory(currentStock);
+  const { quote, isLoading: quoteLoading, error: quoteError } = useStockQuote(currentStock, currentMarket);
+  const { data: chartData, isLoading: historyLoading, error: historyError } = useStockHistory(currentStock, currentMarket);
 
   const handleAddStock = async () => {
     if (stockInput.trim()) {
-      await addMutation.mutateAsync({ symbol: stockInput.toUpperCase() });
-      setSelectedStock(stockInput.toUpperCase());
+      const sym = stockInput.toUpperCase();
+      await addMutation.mutateAsync({ symbol: sym, market: selectedMarket });
+      setSelectedStock(sym);
+      setSelectedMarket(selectedMarket);
     }
   };
 
@@ -86,6 +104,17 @@ export default function Home() {
         <div className="p-4 border-b border-border">
           <div className="text-sm font-bold neon-glow mb-4">[ 追蹤清單 ]</div>
           <div className="flex gap-2">
+            <select
+              value={selectedMarket}
+              onChange={(e) => setSelectedMarket(e.target.value as Market)}
+              className="bg-input text-foreground border-border text-xs rounded px-2"
+            >
+              {MARKETS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
             <Input
               placeholder="股票代號..."
               value={stockInput}
@@ -112,16 +141,24 @@ export default function Home() {
           ) : (
             watchlist.map((stock) => (
               <div
-                key={stock.id}
-                onClick={() => setSelectedStock(stock.symbol)}
+                key={`${stock.symbol}-${stock.market}`}
+                onClick={() => {
+                  setSelectedStock(stock.symbol);
+                  setSelectedMarket((stock.market || "TW") as Market);
+                }}
                 className={`p-3 rounded cursor-pointer transition-colors border ${
-                  selectedStock === stock.symbol
+                  selectedStock === stock.symbol && (stock.market || "TW") === currentMarket
                     ? "bg-card border-primary text-primary"
                     : "bg-transparent border-border hover:bg-card/50"
                 }`}
               >
                 <div className="flex justify-between items-start mb-1">
-                  <span className="font-bold text-sm">{stock.symbol}</span>
+                  <span className="font-bold text-sm">
+                    {stock.symbol}
+                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                      {marketLabel(stock.market)}
+                    </span>
+                  </span>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -174,7 +211,7 @@ export default function Home() {
             )}
           </div>
           <div className="text-xs text-muted-foreground">
-            [ {new Date().toLocaleString("zh-TW")} ]
+            [ {formatDateYMD(new Date())} ]
           </div>
         </div>
 
@@ -241,7 +278,7 @@ export default function Home() {
             </Card>
           )}
 
-          <StreamingAnalysis symbol={currentStock} />
+          <StreamingAnalysis symbol={currentStock} market={currentMarket} />
         </div>
       </div>
     </div>

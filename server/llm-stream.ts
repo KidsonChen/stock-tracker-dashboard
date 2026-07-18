@@ -1,4 +1,5 @@
 import { invokeLLM } from "./_core/llm";
+import { ENV } from "./_core/env";
 import { analyzeTechnicals, formatTechnicalAnalysisForLLM, type CandleData } from "./ma-analysis";
 
 export interface StreamChunk {
@@ -22,7 +23,7 @@ export async function* streamLLMAnalysis(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      model: "gpt-4o-mini",
+      model: ENV.routerAiModel || "tencent/hy3:free",
       max_tokens: 2000,
     });
 
