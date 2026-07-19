@@ -227,6 +227,41 @@ npx vercel
 - **tailwindcss** - 樣式
 - **vite / vitest** - 建構與測試
 
+## ⚠️ 已知問題與限制
+
+### 1. 僅支援台股（TWSE），不含美股 / 港股
+- `server/twse-live.ts` 的 `getTWSEQuote` / `getTWSECandles` 只串接台灣證交所 API。
+- 若 watchlist 加入美股代號（如 `AAPL`），會報錯：
+  `Error: TWSE 無 AAPL 資料`（quote）或 `TRPCError: 無法取得 AAPL 歷史資料`（history, code: NOT_FOUND）。
+- 美股客戶端 `server/finnhub.ts` 已整合但**未在 `server/routers.ts` 啟用**；如需美股，要改成依市場別路由（TW→twse-live，US→finnhub）。
+
+### 2. 股票路由需要登入 Session
+- 報價 / 歷史 / 分析路由受 Auth 保護，未登入會出現 `[Auth] Missing session cookie`，
+  前端需先通過 OAuth 登入（見 `.env` 的 `OAUTH_SERVER_URL`）。
+- 本機開發若未配置 OAuth，server 仍可啟動，但股票 API 會被擋（需在請求帶 session cookie）。
+
+### 3. DuckDB 原生 binding（開發環境已修復）
+- `duckdb@1.4.4` 的原生 binary（`.node`）在 Windows + pnpm 10 下初次 `pnpm install` 可能沒裝上
+  （node-pre-gyp 的 postinstall 遠端下載失敗，僅見 `binding/` 目錄但無 `.node`）。
+- 修復指令：
+  ```bash
+  node node_modules/duckdb/node_modules/node-pre-gyp/bin/www install
+  # 或
+  pnpm rebuild duckdb
+  ```
+- `server/db-duckdb.ts` 已改寫為 duckdb 1.4.4 的 **callback / async API**
+  （原專案寫法為 sqlite 同步風格 `prepare().all()`，與 duckdb 的 `prepare().all(cb)` 不相容，會報
+  `does not provide an export named 'Database'` / `prepare is not a function`）。
+
+### 4. 證交所歷史日線限制
+- `STOCK_DAY?date=YYYYMM` 對任意月份僅回傳「當月」資料，無法取得真實歷史；
+  歷史 K 線改由 FinMind `TaiwanStockPrice` 提供（免認證），失敗時 fallback 回當月。
+
+### 5. 啟動腳本（Windows / MSYS 注意）
+- `pnpm dev` 預設 `NODE_ENV=development tsx watch server/_core/index.ts`，
+  在 MSYS/git-bash 下可能因 `no job control` 報錯。
+- 可改用：`node --import tsx server/_core/index.ts`（已驗證可成功啟動並印出 `Server running on`）。
+
 ## 🤝 貢獻指南
 
 歡迎提交 Issue 或 Pull Request！
