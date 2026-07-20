@@ -103,8 +103,13 @@ temp/
 
 # Database
 *.db
+*.db.wal
 *.sqlite
 *.sqlite3
+# Runtime DuckDB WAL / lock files (never commit; regenerated on startup)
+data/stock.db
+data/stock.db.wal
+data/stock.db.corrupt.*
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/

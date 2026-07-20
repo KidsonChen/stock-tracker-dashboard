@@ -39,10 +39,67 @@ export function getDB(): Promise<any> {
 
   _initPromise = (async () => {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+    // 既有 DB 檔 → 先健全度檢查（開檔 + SELECT 1）。
+    // 若檔案已損毀（unique_ptr is NULL / WAL replay 失敗 / 連線建立失敗等），
+    // 將其隔離為 stock.db.corrupt.<ts> 後重建空白 DB，否則每次查詢都會崩潰
+    // （getWatchlist 會一直噴 INTERNAL Error: unique_ptr is NULL）。
+    // 注意：若檔案被其他程序鎖定（EBUSY），不擅自重建，直接往上拋錯。
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        const probe = new Database(DB_PATH);
+        await new Promise<void>((resolve, reject) => {
+          let conn: any;
+          try {
+            conn = probe.connect();
+          } catch (e) {
+            return reject(e);
+          }
+          conn.all("SELECT 1", (e: any) => (e ? reject(e) : resolve()));
+        });
+        await new Promise<void>((resolve) => probe.close(() => resolve()));
+      } catch (e: any) {
+        const msg = (e && (e.message ? String(e.message) : String(e))) || "";
+        const isLock =
+          msg.includes("being used by another process") ||
+          msg.includes("EBUSY") ||
+          msg.includes("resource busy or locked");
+        if (isLock) throw e; // 鎖定錯誤：讓持有者繼續使用，不重建
+        // 其餘開檔/查詢失敗一律視為損毀，隔離後重建空白 DB
+        const ts = Date.now();
+        const damaged = `${DB_PATH}.corrupt.${ts}`;
+        try {
+          fs.renameSync(DB_PATH, damaged);
+          const wal = `${DB_PATH}.wal`;
+          if (fs.existsSync(wal)) fs.renameSync(wal, `${wal}.corrupt.${ts}`);
+          console.error(
+            `[DB] 既有資料庫已損毀，已隔離至 ${damaged}，將重建空白資料庫。`
+          );
+        } catch (renameErr) {
+          console.error(`[DB] 無法隔離損毀資料庫：`, renameErr);
+        }
+      }
+    }
+
     const db = new Database(DB_PATH);
-    await new Promise<void>((resolve, reject) => {
-      db.exec(
-        `CREATE TABLE IF NOT EXISTS watchlist (
+    // 建立單一持久連線（全程只使用這條 _conn，絕不混用 db.exec 的
+    // 內部 default connection —— 同檔雙連線併發是 duckdb 1.4.4
+    // unique_ptr is NULL 檔案損毀的根源）。DDL 與查詢都走 _conn，
+    // 並統一經由 _chain 串行，避免啟動期 DDL 與查詢在同一連線上併發。
+    _conn = db.connect();
+    _db = db;
+    _ready = Promise.resolve();
+
+    // 所有 DDL 也經由 _conn + _chain 執行（與查詢共用同一串行佇列）
+    const connExec = (sql: string) =>
+      withConn<void>((conn) =>
+        new Promise<void>((resolve, reject) => {
+          conn.exec(sql, (e: any) => (e ? reject(e) : resolve()));
+        })
+      );
+
+    await connExec(
+      `CREATE TABLE IF NOT EXISTS watchlist (
           id INTEGER PRIMARY KEY,
           symbol VARCHAR NOT NULL,
           market VARCHAR DEFAULT 'TW',
@@ -70,25 +127,14 @@ export function getDB(): Promise<any> {
         );
         CREATE SEQUENCE IF NOT EXISTS watchlist_seq START 1;
         CREATE SEQUENCE IF NOT EXISTS stock_data_seq START 1;
-        CREATE SEQUENCE IF NOT EXISTS analysis_cache_seq START 1;`,
-        (e: any) => (e ? reject(e) : resolve())
-      );
-    });
+        CREATE SEQUENCE IF NOT EXISTS analysis_cache_seq START 1;`
+    );
     // 向後相容：舊資料庫的 watchlist 可能沒有 market 欄，補上（已存在則忽略）
     try {
-      await new Promise<void>((resolve) => {
-        db.exec(
-          `ALTER TABLE watchlist ADD COLUMN market VARCHAR DEFAULT 'TW'`,
-          () => resolve()
-        );
-      });
+      await connExec(`ALTER TABLE watchlist ADD COLUMN market VARCHAR DEFAULT 'TW'`);
     } catch {
       // 欄位已存在，忽略
     }
-    // 建立單一持久連線（不再每次 db.connect() 開新連線）
-    _conn = db.connect();
-    _db = db;
-    _ready = Promise.resolve();
     return db;
   })();
 
