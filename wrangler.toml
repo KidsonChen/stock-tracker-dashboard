@@ -11,5 +11,5 @@ bucket_name = "stock-tracker-bucket"
 # 生產環境環境變數（敏感值請用 wrangler secret put 設定，不要寫在這裡）
 [vars]
 NODE_ENV = "production"
-ROUTER_AI_BASE_URL = "https://router.ai"
-ROUTER_AI_MODEL = "anthropic/claude-3.5-sonnet"
+ROUTER_AI_BASE_URL = "https://openrouter.ai/api/v1"
+ROUTER_AI_MODEL = "free"
