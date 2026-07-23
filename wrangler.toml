@@ -2,6 +2,12 @@ name = "stock-tracker-dashboard"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "dist/public"
+min_node_version = "20"
+
+# 平臺 Git 連接模式 build：先裝依賴再產出 dist/public
+# （Cloudflare Pages 平臺會讀 wrangler.toml 的 build command）
+[build]
+command = "npm install && npm run build:cf"
 
 # R2 bucket（取代本地 DuckDB / D1）：儲存 watchlist + analysis_cache 為 JSON 物件
 [[r2_buckets]]
