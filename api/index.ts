@@ -1,11 +1,14 @@
 import { appRouter } from "../server/routers";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { createContext } from "../server/_core/context";
+import { setupLocalBucket } from "../server/local-r2";
 import express from "express";
 import path from "path";
 import fs from "fs";
 
 const app = express();
+// 本地 / Vercel Node 用檔案型 R2 相容層（Cloudflare 部署走真正 R2 binding）
+setupLocalBucket();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 

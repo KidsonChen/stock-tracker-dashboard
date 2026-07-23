@@ -10,6 +10,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { setupLocalBucket } from "../local-r2";
 
 // ─────────────────────────────────────────────────────────────────────────
 // 單例防護：本專案使用嵌入式檔案資料庫 (DuckDB, data/stock.db)。
@@ -82,6 +83,11 @@ async function isPortAvailable(port: number): Promise<boolean> {
 }
 
 async function startServer() {
+  // 本地 R2 相容層（檔案系統）：讓 db-r2 在沒有 Cloudflare R2 binding 的
+  // 本地 / Vercel Node 環境也能運作（儲存於 data/r2/）。
+  // Cloudflare Pages Functions 部署會走真正的 R2 binding，不受影響。
+  setupLocalBucket();
+
   // 防線 1：鎖檔
   acquireLock();
 
