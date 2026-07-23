@@ -5,9 +5,10 @@ pages_build_output_dir = "dist/public"
 min_node_version = "20"
 
 # 平臺 Git 連接模式 build：先裝依賴再產出 dist/public
-# （Cloudflare Pages 平臺會讀 wrangler.toml 的 build command）
+# 注意：平臺預設套件管理器是 pnpm（偵測到 pnpm-lock.yaml），故用 pnpm 而非 npm
+# （用 npm 會因與 pnpm-lock 混用而報 "Cannot read properties of null (reading 'matches')"）
 [build]
-command = "npm install && npm run build:cf"
+command = "pnpm install && pnpm run build:cf"
 
 # R2 bucket（取代本地 DuckDB / D1）：儲存 watchlist + analysis_cache 為 JSON 物件
 [[r2_buckets]]
