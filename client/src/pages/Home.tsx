@@ -86,15 +86,6 @@ export default function Home() {
     }
   };
 
-  if (!currentStock) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6">
-        <div className="text-foreground text-3xl neon-glow font-bold">[ 股市追蹤儀表板 ]</div>
-        <p className="text-muted-foreground text-lg">請在左側新增股票以開始追蹤</p>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-background text-foreground flex overflow-hidden">
       <div
@@ -208,7 +199,7 @@ export default function Home() {
                 </p>
               </div>
             ) : (
-              <div className="text-muted-foreground">[ 載入中... ]</div>
+              <div className="text-muted-foreground">[ 請從左側選擇或新增股票 ]</div>
             )}
           </div>
           <div className="text-xs text-muted-foreground">
@@ -217,6 +208,13 @@ export default function Home() {
         </div>
 
         <div className="flex-1 overflow-auto p-4 space-y-4">
+          {!currentStock ? (
+            <Card className="bg-card border-border p-8 text-center">
+              <div className="text-foreground text-xl neon-glow font-bold mb-2">[ 股市追蹤儀表板 ]</div>
+              <p className="text-muted-foreground">請在左側新增股票代號以開始追蹤，或點選既有的自選股。</p>
+            </Card>
+          ) : (
+          <>
           {(quoteError || historyError) && (
             <Card className="bg-destructive/10 border-destructive p-4">
               <div className="flex items-center gap-2 text-destructive">
@@ -284,6 +282,8 @@ export default function Home() {
           )}
 
           <StreamingAnalysis symbol={currentStock} market={currentMarket} />
+          </>
+          )}
         </div>
       </div>
     </div>

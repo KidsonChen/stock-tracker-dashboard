@@ -2,8 +2,8 @@
 
 本專案原為本地 DuckDB + Express 架構，已重構為可在 Cloudflare 運作的版本：
 - 前端 → Cloudflare Pages（`vite build` → `dist/public`）
-- 後端 API → Cloudflare Pages Functions（tRPC over fetch adapter）
-- 資料儲存 → **Cloudflare R2**（取代本地 DuckDB，存 watchlist + analysis_cache 為 JSON 物件）
+- 後端 API → Cloudflare Pages Functions（tRPC over fetch adapter，位於 `functions/api/[[route]].ts`）
+- 資料儲存 → **Cloudflare R2**（watchlist + analysis_cache 存 JSON 物件）
 
 即時資料（證交所股價/籌碼、Google News 消息面）仍由後端即時抓取，不需資料庫。
 
@@ -12,57 +12,44 @@
 > 因此「DuckDB 部屬到 R2」的做法是：把原本存 DuckDB 的資料（watchlist / analysis_cache）
 > 改存到 R2 bucket 的 JSON 物件，由 Workers 直接讀寫。資料確實位於 R2、可在部屬環境運作。
 
-## 前置
+---
+
+## 方式一：Git 連接部屬（Cloudflare Dashboard 自動 build+deploy）← 推薦
+
+連接 GitHub 倉庫後，在 **Dashboard → Workers & Pages → 專案 → Settings → Build** 設定：
+
+- **Build command**：`npm run build:cf`
+  （= `vite build`，只產 `dist/public`。**不要**用 `pnpm run build`，它會額外 build 沒用的 node server）
+- **Build output directory**：`dist/public`
+- **Deploy command**：`echo "build output ready, Cloudflare auto-deploys"`
+  ⚠️ **重要**：Git 連接的 Pages 在 build 完會**自動上傳 `dist/public` + 自動啟用 `functions/`**，
+  不需要也不能用 `wrangler deploy` / `wrangler pages deploy`（會報
+  `Missing entry-point` / `project does not exist` / `Unknown argument` 等錯）。
+  Deploy command 設成 no-op（echo）即可，平台自己部屬。
+
+部屬前還要設：
+- **R2 bucket** 先建立：Dashboard → R2 → Create bucket → 名稱 `stock-tracker-bucket`
+  （或本地 `wrangler r2 bucket create stock-tracker-bucket`）
+- **綁定**：Settings → Functions → R2 Buckets → 加 `BUCKET` → `stock-tracker-bucket`
+- **變數/secret**：Settings → Variables and Secrets → 加 `ROUTER_AI_API_KEY` 等
+  （AI key 用 secret；非敏感可放 `wrangler.toml` 的 `[vars]`）
+
+改完點 **Retry deployment** 或再 push 一次即上線。網址：`https://<project>.pages.dev`
+
+---
+
+## 方式二：手動 `wrangler pages deploy`
 
 ```bash
-npm install -g wrangler
-wrangler login   # 瀏覽器登入 Cloudflare 帳號
-```
-
-## 1. 建立 R2 bucket
-
-```bash
+wrangler login
 wrangler r2 bucket create stock-tracker-bucket
-```
-
-`wrangler.toml` 已設定 `[[r2_buckets]] binding = "BUCKET"`，Functions 透過 `env.BUCKET` 存取。
-
-## 2. 設定環境變數 / Secret
-
-敏感值用 secret（不進版控）：
-
-```bash
 wrangler secret put ROUTER_AI_API_KEY
-wrangler secret put ROUTER_AI_BASE_URL
-wrangler secret put ROUTER_AI_MODEL
+npm run deploy          # = vite build && wrangler pages deploy dist/public
 ```
 
-非敏感值已放在 `wrangler.toml` 的 `[vars]`（NODE_ENV / ROUTER_AI_BASE_URL / ROUTER_AI_MODEL）。
+> 注意：手動部屬要用 `wrangler pages deploy`（有 `pages`），不是 `wrangler deploy`。
 
-## 3. 部屬
 
-```bash
-npm run deploy
-# 等價於：vite build && wrangler pages deploy dist/public
-```
-
-部屬後在 Cloudflare Dashboard → Pages → 專案 → Settings → Functions → R2 Buckets
-確認 `BUCKET` 已綁定到 `stock-tracker-bucket`。
-
-## 4. 本地預覽（模擬 CF runtime）
-
-```bash
-npm run build:cf                              # 只 build 前端到 dist/public
-wrangler pages dev dist/public --r2           # 啟用 local R2 模擬
-# 開 http://localhost:8788 ，API 在 /api/trpc/*
-```
-
-> ⚠️ 已知：Windows 上 `wrangler pages dev --r2 --local` 的 R2 模擬器偶爾會崩
-> （`RUNTIME WEBSOCKET ERROR` / `write EOF`）。這是 wrangler local R2 的環境問題，
-> 不影響 production 部屬（真實 R2 bucket 穩定）。db-r2.ts 的讀寫邏輯已用 in-memory
-> R2 mock 驗證通過（add / list / remove / saveAnalysisCache / getAnalysisById 皆正確）。
-
-## 檔案清單（部屬相關）
 
 - `wrangler.toml` — Pages + R2 bucket binding + nodejs_compat
 - `server/db-r2.ts` — R2 資料層（watchlist / analysis_cache 存 JSON 於 bucket）

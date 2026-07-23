@@ -59,12 +59,33 @@ function genId(): string {
 }
 
 // ---- watchlist ----
+// 首次部屬 R2 自選清單為空時，自動種入一組預設台股，避免首頁空白卡死。
+// 使用者新增/移除後自然覆寫，不會重複種入（因為 watchlist.json 已存在）。
+const SEED_WATCHLIST: Watchlist[] = [
+  { id: 1, userId: DEFAULT_USER, symbol: "2330", market: "TW", addedAt: nowISO(), updatedAt: nowISO() },
+  { id: 2, userId: DEFAULT_USER, symbol: "2303", market: "TW", addedAt: nowISO(), updatedAt: nowISO() },
+  { id: 3, userId: DEFAULT_USER, symbol: "2454", market: "TW", addedAt: nowISO(), updatedAt: nowISO() },
+  { id: 4, userId: DEFAULT_USER, symbol: "2317", market: "TW", addedAt: nowISO(), updatedAt: nowISO() },
+  { id: 5, userId: DEFAULT_USER, symbol: "3008", market: "TW", addedAt: nowISO(), updatedAt: nowISO() },
+];
+
 export async function getWatchlist(): Promise<Watchlist[]> {
   try {
     const obj = await getBucket().get(WATCHLIST_KEY);
-    if (!obj) return [];
+    if (!obj) {
+      // 首次：bucket 裡沒有 watchlist.json → 種入預設清單並回寫
+      await getBucket().put(WATCHLIST_KEY, JSON.stringify(SEED_WATCHLIST));
+      return SEED_WATCHLIST;
+    }
     const arr = (await obj.json<Watchlist[]>()) as Watchlist[];
-    return arr.filter((w) => w.userId === DEFAULT_USER);
+    const mine = arr.filter((w) => w.userId === DEFAULT_USER);
+    if (mine.length === 0) {
+      // 物件存在但本使用者沒有自選 → 也種入預設
+      const merged = [...arr, ...SEED_WATCHLIST];
+      await getBucket().put(WATCHLIST_KEY, JSON.stringify(merged));
+      return SEED_WATCHLIST;
+    }
+    return mine;
   } catch (e) {
     console.error("[R2] getWatchlist failed", e);
     return [];
