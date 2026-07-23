@@ -11,7 +11,7 @@ import {
   isCacheExpired,
   listAnalysisHistory,
   getAnalysisById,
-} from "./db-duckdb";
+} from "./db-r2";
 import { getTWSECandles, getTWSEQuote } from "./twse-live";
 import { getValuation, estimateOrderBook, getMargin, getForeignTrade, getIndustryIndices as fetchIndustryIndices } from "./twse-extra";
 import { getYahooCandles, getYahooQuote, getYahooValuation } from "./yahoo";

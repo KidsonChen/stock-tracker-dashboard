@@ -1,0 +1,15 @@
+name = "stock-tracker-dashboard"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist/public"
+
+# R2 bucket（取代本地 DuckDB / D1）：儲存 watchlist + analysis_cache 為 JSON 物件
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "stock-tracker-bucket"
+
+# 生產環境環境變數（敏感值請用 wrangler secret put 設定，不要寫在這裡）
+[vars]
+NODE_ENV = "production"
+ROUTER_AI_BASE_URL = "https://router.ai"
+ROUTER_AI_MODEL = "anthropic/claude-3.5-sonnet"
