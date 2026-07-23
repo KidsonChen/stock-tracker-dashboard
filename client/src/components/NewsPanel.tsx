@@ -85,7 +85,13 @@ export function NewsPanel() {
                 </span>
               </div>
               {g.items.length === 0 ? (
-                <div className="text-xs opacity-70">暫無新聞</div>
+                <div className="text-xs opacity-70">
+                  {g.error ? (
+                    <span className="text-amber-500">⚠️ {g.error}</span>
+                  ) : (
+                    "暫無相關新聞"
+                  )}
+                </div>
               ) : (
                 <div className="space-y-2">
                   {g.items.map((it, i) => (

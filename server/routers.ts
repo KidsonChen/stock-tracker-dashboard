@@ -17,7 +17,6 @@ import { getValuation, estimateOrderBook, getMargin, getForeignTrade, getIndustr
 import { getYahooCandles, getYahooQuote, getYahooValuation } from "./yahoo";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
-import { streamDetailedAnalysis } from "./llm-stream";
 import { fetchIndustryNews } from "./news";
 
 // 市場判斷：優先用前端傳入的 market，否則從 symbol 自動推斷（兜底，
@@ -228,81 +227,13 @@ export const appRouter = router({
         }
       }),
 
+    // 註：詳細分析串流已遷移至 SSE 端點 /api/analysis-stream（見 functions/api/[[route]].ts），
+    // 前端 StreamingAnalysis 直接 fetch 該端點讀 SSE，不再經由 tRPC generator（Workers 不支援）。
+    // 此 procedure 保留名稱以避免前端型別斷鏈，但不再使用。
     detailedStream: publicProcedure
       .input(z.object({ symbol: z.string().min(1).max(10), market: z.string().optional(), forceRefresh: z.boolean().optional() }))
-      .query(async function* ({ input }) {
-        try {
-          const _mkt = inferMarket(input.symbol, input.market);
-          const _marketLabel = _mkt === "US" ? "美股" : _mkt === "HK" ? "港股" : "台股";
-          const cached = input.forceRefresh
-            ? null
-            : await getAnalysisCache(0, `${input.symbol}:${_marketLabel}`, "detailed");
-          if (cached) {
-            yield { type: "cached", content: cached.result };
-            return;
-          }
-
-          const twMarket = isTaiwanMarket(inferMarket(input.symbol, input.market));
-          const twseQuote = twMarket
-            ? await getTWSEQuote(cleanTaiwanSymbol(input.symbol))
-            : await getYahooQuote(input.symbol);
-          const history = twMarket
-            ? await getTWSECandles(cleanTaiwanSymbol(input.symbol), 30)
-            : await getYahooCandles(input.symbol, 30);
-
-          const marketLabel =
-            inferMarket(input.symbol, input.market) === "US" ? "美股" :
-            inferMarket(input.symbol, input.market) === "HK" ? "港股" : "台股";
-          const companyName = twMarket ? input.symbol : (twseQuote as any).name || input.symbol;
-
-          const high = Math.max(
-            ...history.map((h) => Number(h.high || 0))
-          );
-          const low = Math.min(
-            ...history.map((h) => Number(h.low || 0))
-          );
-
-          const candleData = history
-            .map((h) => ({
-              date: String(h.date),
-              open: Number(h.open || 0),
-              high: Number(h.high || 0),
-              low: Number(h.low || 0),
-              close: Number(h.close || 0),
-              volume: Number(h.volume || 0),
-            }))
-            .reverse();
-
-          let fullReport = "";
-
-          for await (const chunk of streamDetailedAnalysis(
-            input.symbol,
-            twseQuote.currentPrice,
-            high,
-            low,
-            candleData,
-            companyName,
-            marketLabel
-          )) {
-            yield chunk;
-
-            if (chunk.type === "text" && chunk.content) {
-              fullReport += chunk.content;
-            }
-          }
-
-          if (fullReport) {
-            await saveAnalysisCache(0, `${input.symbol}:${marketLabel}`, "detailed", fullReport);
-          }
-        } catch (error) {
-          console.error("[Analysis] Failed to generate detailed report:", error);
-          yield {
-            type: "error",
-            message: `分析失敗: ${
-              error instanceof Error ? error.message : "未知錯誤"
-            }`,
-          };
-        }
+      .query(async () => {
+        return { migrated: true, useEndpoint: "/api/analysis-stream" };
       }),
 
     // 列出某股歷史分析紀錄（新→舊），供「歷史紀錄」下拉。快取 key 格式：SYMBOL:市場別

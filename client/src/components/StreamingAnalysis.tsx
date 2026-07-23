@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, RefreshCw, History } from "lucide-react";
@@ -16,6 +16,13 @@ interface AnalysisSection {
   isComplete: boolean;
 }
 
+interface StreamChunk {
+  type: "text" | "section_start" | "section_end" | "complete" | "error" | "cached";
+  content?: string;
+  title?: string;
+  message?: string;
+}
+
 export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [sections, setSections] = useState<AnalysisSection[]>([]);
@@ -24,11 +31,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
   const [forceRefresh, setForceRefresh] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
-
-  const { data: streamData, isLoading } = trpc.analysis.detailedStream.useQuery(
-    { symbol, market: market ?? "TW", forceRefresh },
-    { enabled: isAnalyzing }
-  );
+  const abortRef = useRef<AbortController | null>(null);
 
   // 歷史紀錄清單（展開時才查）
   const { data: historyData, refetch: refetchHistory } = trpc.analysis.listHistory.useQuery(
@@ -53,64 +56,8 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
     }
   }, [historyItem, selectedHistoryId]);
 
-  // 處理串流資料
-  useEffect(() => {
-    if (!streamData || !isAnalyzing) return;
-
-    // 檢查是否是快取資料
-    if (Array.isArray(streamData) && streamData[0]?.type === "cached") {
-      setIsCached(true);
-      setSections([
-        {
-          title: "快取分析結果",
-          content: streamData[0].content || "",
-          isComplete: true,
-        },
-      ]);
-      setIsAnalyzing(false);
-      return;
-    }
-
-    // 處理串流塊
-    let currentSection: AnalysisSection | null = null;
-    const newSections: AnalysisSection[] = [];
-
-    for (const chunk of Array.isArray(streamData) ? streamData : [streamData]) {
-      if (chunk.type === "section_start" && "title" in chunk) {
-        if (currentSection) {
-          newSections.push(currentSection);
-        }
-        currentSection = {
-          title: (chunk as any).title || "分析",
-          content: "",
-          isComplete: false,
-        };
-      } else if (chunk.type === "section_end") {
-        if (currentSection) {
-          currentSection.isComplete = true;
-          newSections.push(currentSection);
-          currentSection = null;
-        }
-      } else if (chunk.type === "text" && chunk.content) {
-        if (currentSection) {
-          currentSection.content += chunk.content;
-        }
-      } else if (chunk.type === "error") {
-        setError(chunk.message || "分析失敗");
-        setIsAnalyzing(false);
-      } else if (chunk.type === "complete") {
-        if (currentSection) {
-          currentSection.isComplete = true;
-          newSections.push(currentSection);
-        }
-        setIsAnalyzing(false);
-      }
-    }
-
-    setSections(newSections);
-  }, [streamData, isAnalyzing]);
-
-  const handleStartAnalysis = (force: boolean = false) => {
+  // 透過 SSE（/api/analysis-stream）讀取串流分析
+  const runAnalysis = async (force: boolean) => {
     setIsAnalyzing(true);
     setError(null);
     setIsCached(false);
@@ -118,6 +65,102 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
     setShowHistory(false);
     setSelectedHistoryId(null);
     setForceRefresh(force);
+
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    try {
+      const res = await fetch("/api/analysis-stream", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ symbol, market: market ?? "TW", forceRefresh: force }),
+        signal: ac.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error(`分析請求失敗 (HTTP ${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      // 即時累積的區塊狀態
+      let currentSection: AnalysisSection | null = null;
+      const flush = () => {
+        if (currentSection) {
+          setSections((prev) => {
+            const idx = prev.findIndex((s) => s.title === currentSection!.title && !s.isComplete);
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = { ...currentSection };
+              return copy;
+            }
+            return [...prev, { ...currentSection }];
+          });
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE: 以 "\n\n" 切分事件
+        let sep: number;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const raw = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const line = raw.split("\n").find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          let chunk: StreamChunk;
+          try {
+            chunk = JSON.parse(line.slice(5).trim());
+          } catch {
+            continue;
+          }
+
+          if (chunk.type === "cached") {
+            setIsCached(true);
+            setSections([{ title: "快取分析結果", content: chunk.content || "", isComplete: true }]);
+            setIsAnalyzing(false);
+          } else if (chunk.type === "section_start") {
+            currentSection = { title: chunk.title || "分析", content: "", isComplete: false };
+          } else if (chunk.type === "text" && chunk.content) {
+            if (currentSection) {
+              currentSection.content += chunk.content;
+              flush(); // 即時更新 -> 打字機效果
+            }
+          } else if (chunk.type === "section_end") {
+            if (currentSection) {
+              currentSection.isComplete = true;
+              flush();
+              currentSection = null;
+            }
+          } else if (chunk.type === "error") {
+            setError(chunk.message || "分析失敗");
+            setIsAnalyzing(false);
+          } else if (chunk.type === "complete") {
+            if (currentSection) {
+              currentSection.isComplete = true;
+              flush();
+              currentSection = null;
+            }
+            setIsAnalyzing(false);
+          }
+        }
+      }
+      setIsAnalyzing(false);
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        setError(e.message || "分析失敗");
+      }
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleStartAnalysis = (force: boolean = false) => {
+    runAnalysis(force);
   };
 
   return (
@@ -127,10 +170,10 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
         <div className="flex items-center gap-2">
           <Button
             onClick={() => handleStartAnalysis(sections.length > 0)}
-            disabled={isAnalyzing || isLoading}
+            disabled={isAnalyzing}
             className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
           >
-            {isAnalyzing || isLoading ? (
+            {isAnalyzing ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
                 分析中...
@@ -147,7 +190,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
               setShowHistory((v) => !v);
               if (!showHistory) refetchHistory();
             }}
-            disabled={isAnalyzing || isLoading}
+            disabled={isAnalyzing}
             variant="outline"
             size="sm"
             className="flex items-center gap-1.5"
@@ -220,7 +263,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
             </div>
           ))}
         </div>
-      ) : !isAnalyzing && !isLoading ? (
+      ) : !isAnalyzing ? (
         <div className="p-4 bg-background rounded border border-border text-center">
           <div className="text-xs text-muted-foreground">
             [ 點擊按鈕開始詳細分析 ]
@@ -229,7 +272,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
       ) : null}
 
       {/* 載入狀態 */}
-      {(isAnalyzing || isLoading) && sections.length === 0 && (
+      {isAnalyzing && sections.length === 0 && (
         <div className="p-4 bg-background rounded border border-border text-center">
           <div className="flex items-center justify-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
