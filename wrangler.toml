@@ -2,13 +2,6 @@ name = "stock-tracker-dashboard"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "dist/public"
-min_node_version = "20"
-
-# 平臺 Git 連接模式 build：先裝依賴再產出 dist/public
-# 注意：平臺預設套件管理器是 pnpm（偵測到 pnpm-lock.yaml），故用 pnpm 而非 npm
-# （用 npm 會因與 pnpm-lock 混用而報 "Cannot read properties of null (reading 'matches')"）
-[build]
-command = "pnpm install && pnpm run build:cf"
 
 # R2 bucket（取代本地 DuckDB / D1）：儲存 watchlist + analysis_cache 為 JSON 物件
 [[r2_buckets]]
@@ -20,3 +13,10 @@ bucket_name = "stock-tracker-bucket"
 NODE_ENV = "production"
 ROUTER_AI_BASE_URL = "https://openrouter.ai/api/v1"
 ROUTER_AI_MODEL = "openrouter/auto"
+
+# 注意：Pages 專案的 wrangler.toml 不支援 [build] / min_node_version 欄位
+# （那是 Workers 語法）。Build command 與 Node 版本請在
+# Dashboard → Settings → Build 設定：
+#   Build command: pnpm install && pnpm run build:cf
+#   Build output directory: dist/public
+#   Node.js version: 20
