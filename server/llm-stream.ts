@@ -23,7 +23,7 @@ export async function* streamLLMAnalysis(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      model: ENV.routerAiModel || "tencent/hy3:free",
+      model: ENV.routerAiModel || "openrouter/free",
       max_tokens: 2000,
     });
 
@@ -64,9 +64,14 @@ export async function* streamDetailedAnalysis(
   currentPrice: number,
   high: number,
   low: number,
-  candleData?: CandleData[]
+  candleData?: CandleData[],
+  companyName?: string,
+  marketLabel?: string
 ): AsyncGenerator<StreamChunk> {
   try {
+    const target = companyName
+      ? `${companyName}（${marketLabel || ""} ${symbol}）`
+      : symbol;
     // 如果提供了 K 線數據，進行技術分析
     let technicalAnalysisData = "";
     if (candleData && candleData.length > 0) {
@@ -87,7 +92,7 @@ export async function* streamDetailedAnalysis(
     // 第一部分：技術面分析
     yield { type: "section_start", title: "技術面分析" };
 
-    const technicalPrompt = `請對股票 ${symbol} 進行詳細的技術面分析。
+    const technicalPrompt = `請對股票 ${target} 進行詳細的技術面分析。
 當前價格: $${currentPrice}
 近期高點: $${high}
 近期低點: $${low}
@@ -102,12 +107,14 @@ ${technicalAnalysisData ? `【實時技術指標數據】\n${technicalAnalysisDa
 
 請用簡潔的方式逐步輸出分析結果，每個要點用換行分隔。`;
 
+    console.log('[LLM Stream] Calling technical analysis LLM...');
     for await (const chunk of streamLLMAnalysis(
       "You are a professional stock analyst specializing in technical analysis. Respond in Traditional Chinese with clear structure. Pay special attention to moving average signals and trend analysis.",
       technicalPrompt
     )) {
       if (chunk.type === "complete") {
         yield { type: "section_end" };
+        console.log('[LLM Stream] Technical analysis section complete');
       } else {
         yield chunk;
       }
@@ -116,7 +123,7 @@ ${technicalAnalysisData ? `【實時技術指標數據】\n${technicalAnalysisDa
     // 第二部分：基本面分析
     yield { type: "section_start", title: "基本面分析" };
 
-    const fundamentalPrompt = `請對股票 ${symbol} 進行詳細的基本面分析。
+    const fundamentalPrompt = `請對股票 ${target} 進行詳細的基本面分析。
 當前價格: $${currentPrice}
 
 請分析：
@@ -127,21 +134,28 @@ ${technicalAnalysisData ? `【實時技術指標數據】\n${technicalAnalysisDa
 
 請用簡潔的方式逐步輸出分析結果，每個要點用換行分隔。`;
 
-    for await (const chunk of streamLLMAnalysis(
-      "You are a professional stock analyst specializing in fundamental analysis. Respond in Traditional Chinese with clear structure.",
-      fundamentalPrompt
-    )) {
-      if (chunk.type === "complete") {
-        yield { type: "section_end" };
-      } else {
-        yield chunk;
+    console.log('[LLM Stream] Calling fundamental analysis LLM...');
+    try {
+      for await (const chunk of streamLLMAnalysis(
+        "You are a professional stock analyst specializing in fundamental analysis. Respond in Traditional Chinese with clear structure.",
+        fundamentalPrompt
+      )) {
+        if (chunk.type === "complete") {
+          yield { type: "section_end" };
+          console.log('[LLM Stream] Fundamental analysis section complete');
+        } else {
+          yield chunk;
+        }
       }
+    } catch (err) {
+      console.error('[LLM Stream] Fundamental analysis failed:', err);
+      yield { type: 'error', message: '基本面分析失敗' };
     }
 
     // 第三部分：未來走勢預測
     yield { type: "section_start", title: "未來走勢預測" };
 
-    const forecastPrompt = `基於以上分析，請預測股票 ${symbol} 在未來 1-3 個月的走勢。
+    const forecastPrompt = `基於以上分析，請預測股票 ${target} 在未來 1-3 個月的走勢。
 當前價格: $${currentPrice}
 
 ${technicalAnalysisData ? `【技術面參考】\n支撐位：${technicalAnalysisData.match(/支撐位：\$[\d.]+/)?.[0] || "N/A"}\n阻力位：${technicalAnalysisData.match(/阻力位：\$[\d.]+/)?.[0] || "N/A"}\n` : ""}
@@ -154,15 +168,22 @@ ${technicalAnalysisData ? `【技術面參考】\n支撐位：${technicalAnalysi
 
 請用簡潔的方式逐步輸出預測結果，每個要點用換行分隔。`;
 
-    for await (const chunk of streamLLMAnalysis(
-      "You are a professional stock analyst providing investment forecasts. Respond in Traditional Chinese with clear structure.",
-      forecastPrompt
-    )) {
-      if (chunk.type === "complete") {
-        yield { type: "section_end" };
-      } else {
-        yield chunk;
+    console.log('[LLM Stream] Calling forecast analysis LLM...');
+    try {
+      for await (const chunk of streamLLMAnalysis(
+        "You are a professional stock analyst providing investment forecasts. Respond in Traditional Chinese with clear structure.",
+        forecastPrompt
+      )) {
+        if (chunk.type === "complete") {
+          yield { type: "section_end" };
+          console.log('[LLM Stream] Forecast analysis section complete');
+        } else {
+          yield chunk;
+        }
       }
+    } catch (err) {
+      console.error('[LLM Stream] Forecast analysis failed:', err);
+      yield { type: 'error', message: '未來走勢預測失敗' };
     }
 
     yield { type: "complete" };

@@ -70,3 +70,67 @@ export function useStockHistory(symbol: string | null, market?: string) {
     error: error?.message || null,
   };
 }
+
+export interface StockExtraData {
+  symbol: string;
+  market: string;
+  name?: string;
+  currency?: string;
+  fiftyTwoWeek?: { high?: number; low?: number } | null;
+  valuation: {
+    date: string;
+    rawDate?: string;
+    dividendYield: number;
+    peRatio: number;
+    pbRatio: number;
+    fiscalYear: string;
+    isRealtime?: boolean;
+    price?: number;
+    volume?: number;
+    marketCap?: number | null;
+  } | null;
+  orderBook: {
+    symbol: string;
+    isEstimate: true;
+    note: string;
+    levels: {
+      bidPrice: number;
+      bidVol: number;
+      askPrice: number;
+      askVol: number;
+    }[];
+    avgPrice: number;
+    totalVol: number;
+  } | null;
+  margin: {
+    symbol: string;
+    marginBalance: number;
+    marginBuy: number;
+    marginSell: number;
+    shortBalance: number;
+    shortBuy: number;
+    shortSell: number;
+  } | null;
+  foreignTrade: {
+    symbol: string;
+    foreignNet: number;
+    foreignBuy: number;
+    foreignSell: number;
+    trustNet: number;
+    dealerNet: number;
+  } | null;
+  recentCandles?: { date: string; close: number; volume: number }[];
+}
+
+export function useStockExtra(symbol: string | null, market?: string) {
+  const { data, isLoading, error } = trpc.getExtra.useQuery(
+    { symbol: symbol || "", market: market ?? "TW" },
+    { enabled: !!symbol, staleTime: 5 * 60 * 1000 }
+  );
+
+  return {
+    data: (data as StockExtraData | undefined) || null,
+    isLoading,
+    error: error?.message || null,
+  };
+}

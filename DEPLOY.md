@@ -8,7 +8,7 @@
    - `SUPABASE_ANON_KEY=<SECRET_5b437d0b>`
    - `ROUTER_AI_API_KEY`
    - `ROUTER_AI_BASE_URL=https://routerai.net/api/v1`
-   - `ROUTER_AI_MODEL=routerai/auto`
+   - `ROUTER_AI_MODEL=openrouter/free`
 3. 在 terminal 登入 Vercel:
    ```bash
    npx vercel login

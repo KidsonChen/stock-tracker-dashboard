@@ -22,7 +22,17 @@ const { Database } = duckdb as any;
  */
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
-const DB_PATH = process.env.DUCKDB_PATH || path.join(DATA_DIR, "stock.db");
+
+function getDBPath(): string {
+  return process.env.DUCKDB_PATH || path.join(DATA_DIR, "stock.db");
+}
+
+function getRecoveryDBPath(basePath: string): string {
+  const ext = path.extname(basePath);
+  const stem = path.basename(basePath, ext);
+  const dir = path.dirname(basePath);
+  return path.join(dir, `${stem}.recovered.${Date.now()}${ext}`);
+}
 
 let _db: any = null;
 let _conn: any = null;
@@ -33,55 +43,120 @@ let _chain: Promise<any> = Promise.resolve();
 // init 完成閘門：確保所有 SQL 都在 _conn 就緒後才執行
 let _ready: Promise<void> | null = null;
 
+async function closeDuckDBHandle(handle: any): Promise<void> {
+  if (!handle) return;
+  try {
+    if (typeof handle.close === "function") {
+      await new Promise<void>((resolve) => {
+        try {
+          handle.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
+    }
+  } catch {
+    // Ignore close failures; the connection is already broken or unavailable.
+  }
+}
+
+async function resetDuckDBState(): Promise<void> {
+  _chain = Promise.resolve();
+  _ready = null;
+  _initPromise = null;
+  const previousDb = _db;
+  const previousConn = _conn;
+  _db = null;
+  _conn = null;
+  await Promise.allSettled([closeDuckDBHandle(previousConn), closeDuckDBHandle(previousDb)]);
+}
+
 export function getDB(): Promise<any> {
   if (_db && _conn && _ready) return Promise.resolve(_db);
   if (_initPromise) return _initPromise;
 
   _initPromise = (async () => {
+    let DB_PATH = getDBPath();
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-    // 既有 DB 檔 → 先健全度檢查（開檔 + SELECT 1）。
-    // 若檔案已損毀（unique_ptr is NULL / WAL replay 失敗 / 連線建立失敗等），
-    // 將其隔離為 stock.db.corrupt.<ts> 後重建空白 DB，否則每次查詢都會崩潰
-    // （getWatchlist 會一直噴 INTERNAL Error: unique_ptr is NULL）。
-    // 注意：若檔案被其他程序鎖定（EBUSY），不擅自重建，直接往上拋錯。
-    if (fs.existsSync(DB_PATH)) {
+    // 開檔策略（關鍵修正）：
+    // 舊邏輯會先開一個「臨時」Database 句柄做 SELECT 1 probe，再關掉、再開
+    // 正式句柄。在 Windows + DuckDB 1.4.4 下，這種「開→關→再開同一檔案」
+    // 極易因檔案鎖釋放延遲而自我鎖定（EBUSY），被誤判成「檔案損毀」，
+    // 進而 rename 隔離失敗 → 切到空的 *.recovered.* 檔 → 讀到空資料、查詢全炸。
+    // 修正：直接開「正式」db，並用同一個 db 的 conn 做 SELECT 1 驗證，
+    // 絕不再開第二個 Database 句柄。
+    //   - 鎖定類錯誤（EBUSY / being used by another process / resource busy）：
+    //     一律「不隔離、不切 recovered」，改為 sleep 後重試開檔（鎖通常是
+    //     暫時的，延遲釋放後即可成功）。只有真的重試多次仍失敗才放棄。
+    //   - 真正損毀（corrupt / not a database / unable to read）：才隔離重建。
+    // 說明：本專案已用 data/.server.lock 保證單一 process 開檔，不會有跨
+    // process 長期併發；會遇到的鎖幾乎都是上一個句柄釋放延遲，重試即可。
+    const isLockError = (msg: string) =>
+      msg.includes("EBUSY") ||
+      msg.includes("being used by another process") ||
+      msg.includes("resource busy or locked") ||
+      msg.includes("database is locked") ||
+      msg.includes("Conflicting lock");
+
+    const isCorruptError = (msg: string) =>
+      msg.includes("corrupt") ||
+      msg.includes("not a database") ||
+      msg.includes("unable to read") ||
+      msg.includes("magic number") ||
+      msg.includes("Checksum") ||
+      msg.includes("unique_ptr is NULL");
+
+    let db: any = null;
+    let opened = false;
+    const MAX_OPEN_RETRY = 5;
+    for (let attempt = 1; attempt <= MAX_OPEN_RETRY && !opened; attempt++) {
       try {
-        const probe = new Database(DB_PATH);
+        db = new Database(DB_PATH);
+        _conn = db.connect();
+        // 用同一個 db 的 conn 驗證（不再開新 Database 句柄）
         await new Promise<void>((resolve, reject) => {
-          let conn: any;
-          try {
-            conn = probe.connect();
-          } catch (e) {
-            return reject(e);
-          }
-          conn.all("SELECT 1", (e: any) => (e ? reject(e) : resolve()));
+          _conn.all("SELECT 1", (e: any) => (e ? reject(e) : resolve()));
         });
-        await new Promise<void>((resolve) => probe.close(() => resolve()));
+        opened = true;
       } catch (e: any) {
         const msg = (e && (e.message ? String(e.message) : String(e))) || "";
-        const isLock =
-          msg.includes("being used by another process") ||
-          msg.includes("EBUSY") ||
-          msg.includes("resource busy or locked");
-        if (isLock) throw e; // 鎖定錯誤：讓持有者繼續使用，不重建
-        // 其餘開檔/查詢失敗一律視為損毀，隔離後重建空白 DB
-        const ts = Date.now();
-        const damaged = `${DB_PATH}.corrupt.${ts}`;
-        try {
-          fs.renameSync(DB_PATH, damaged);
-          const wal = `${DB_PATH}.wal`;
-          if (fs.existsSync(wal)) fs.renameSync(wal, `${wal}.corrupt.${ts}`);
-          console.error(
-            `[DB] 既有資料庫已損毀，已隔離至 ${damaged}，將重建空白資料庫。`
+        await resetDuckDBState();
+        if (isLockError(msg) && attempt < MAX_OPEN_RETRY) {
+          console.warn(
+            `[DB] 開檔遇到鎖定（${msg}），第 ${attempt} 次重試（${MAX_OPEN_RETRY - attempt} 次剩餘）...`
           );
-        } catch (renameErr) {
-          console.error(`[DB] 無法隔離損毀資料庫：`, renameErr);
+          await new Promise((r) => setTimeout(r, 400 * attempt));
+          continue;
         }
+        if (isCorruptError(msg)) {
+          const ts = Date.now();
+          const damaged = `${DB_PATH}.corrupt.${ts}`;
+          const wal = `${DB_PATH}.wal`;
+          const damagedWal = `${wal}.corrupt.${ts}`;
+          try {
+            fs.renameSync(DB_PATH, damaged);
+            if (fs.existsSync(wal)) fs.renameSync(wal, damagedWal);
+            console.error(
+              `[DB] 既有資料庫已損毀（${msg || "未知錯誤"}），已隔離至 ${damaged}，將重建空白資料庫。`
+            );
+          } catch (renameErr) {
+            console.warn(`[DB] 無法隔離損毀資料庫，將切換到新的檔案：`, renameErr);
+          }
+          DB_PATH = getRecoveryDBPath(DB_PATH);
+          process.env.DUCKDB_PATH = DB_PATH;
+          console.warn(`[DB] 使用新的資料庫路徑：${DB_PATH}`);
+          // 用新路徑再試一次開檔
+          attempt = 0;
+          continue;
+        }
+        // 其他未知錯誤：放棄，拋出
+        throw e;
       }
     }
-
-    const db = new Database(DB_PATH);
+    if (!opened || !db) {
+      throw new Error(`[DB] 無法開啟資料庫（路徑 ${DB_PATH}），已重試 ${MAX_OPEN_RETRY} 次仍失敗。`);
+    }
     // 建立單一持久連線（全程只使用這條 _conn，絕不混用 db.exec 的
     // 內部 default connection —— 同檔雙連線併發是 duckdb 1.4.4
     // unique_ptr is NULL 檔案損毀的根源）。DDL 與查詢都走 _conn，
@@ -144,10 +219,33 @@ export function getDB(): Promise<any> {
 // ---- callback -> Promise 封裝（經由 _chain 嚴格串行，prepare + 展開參數）----
 
 async function withConn<T>(fn: (conn: any) => Promise<T>): Promise<T> {
-  // 確保 init（_conn）完成
   if (!_conn) await getDB();
-  const task = _chain.then(() => fn(_conn));
-  // 保證鏈不中斷（錯誤也接住，往下走）
+  if (!_conn) throw new Error("DuckDB connection unavailable");
+
+  const attempt = async (conn: any): Promise<T> => {
+    try {
+      return await fn(conn);
+    } catch (e: any) {
+      const msg = (e && (e.message ? String(e.message) : String(e))) || "";
+      if (
+        msg.includes("Connection was never established") ||
+        msg.includes("Connection has been closed")
+      ) {
+        console.warn("[DB] 連線遺失（%s），嘗試重建...", msg);
+        try {
+          await resetDuckDBState();
+          await getDB();
+          return await fn(_conn);
+        } catch (reconnectErr) {
+          console.error("[DB] 重建連線失敗：", reconnectErr);
+          throw e;
+        }
+      }
+      throw e;
+    }
+  };
+
+  const task = _chain.then(() => attempt(_conn));
   _chain = task.then(
     () => undefined,
     () => undefined
@@ -155,13 +253,32 @@ async function withConn<T>(fn: (conn: any) => Promise<T>): Promise<T> {
   return task;
 }
 
+// DuckDB 1.4.4 會把整數/序列值以 JS BigInt 回傳，而 tRPC + superjson
+// 在序列化 BigInt 時會拋 "Do not know how to serialize a BigInt"，
+// 導致所有讀取/寫入的結果在回傳前端時炸成 500（前端誤以為失敗、
+// 不切換到選中狀態、K 線圖永遠不出現）。這裡在統一出口把 BigInt
+// 轉成 Number（安全，本專案所有 id/count/price 都在 Number 範圍內）。
+function serializeRow(row: any): any {
+  if (row === null || row === undefined) return row;
+  if (typeof row === "bigint") return Number(row);
+  if (Array.isArray(row)) return row.map(serializeRow);
+  if (typeof row === "object") {
+    const out: any = {};
+    for (const k of Object.keys(row)) out[k] = serializeRow(row[k]);
+    return out;
+  }
+  return row;
+}
+
 function all<T = any>(_db: any, sql: string, params: any[] = []): Promise<T[]> {
   return withConn<T[]>((conn) => {
     return new Promise<T[]>((resolve, reject) => {
       const stmt = conn.prepare(sql, (e: any) => (e ? reject(e) : null));
-      stmt.all(...params, (e: any, rows: T[]) =>
-        e ? reject(e) : resolve(rows || [])
-      );
+      stmt.all(...params, (e: any, rows: T[]) => {
+        if (e) return reject(e);
+        const safe = (rows || []).map(serializeRow);
+        resolve(safe as T[]);
+      });
     });
   });
 }
@@ -346,6 +463,49 @@ export async function saveAnalysisCache(
     );
   } catch (e) {
     console.error("[DB] saveAnalysisCache failed", e);
+  }
+}
+
+/**
+ * 列出某 symbol 的分析歷史紀錄（所有版本，新→舊），供前端「歷史紀錄」下拉使用。
+ */
+export async function listAnalysisHistory(
+  userId: number,
+  symbol: string,
+  analysisType?: string
+): Promise<AnalysisCache[]> {
+  try {
+    const db = await getDB();
+    const sql = analysisType
+      ? "SELECT * FROM analysis_cache WHERE userId = ? AND symbol = ? AND analysisType = ? ORDER BY createdAt DESC"
+      : "SELECT * FROM analysis_cache WHERE userId = ? AND symbol = ? ORDER BY createdAt DESC";
+    const params = analysisType
+      ? [userId, symbol.toUpperCase(), analysisType]
+      : [userId, symbol.toUpperCase()];
+    return await all<AnalysisCache>(db, sql, params);
+  } catch (e) {
+    console.error("[DB] listAnalysisHistory failed", e);
+    return [];
+  }
+}
+
+/**
+ * 依 id 取單筆分析紀錄（使用者從歷史下拉選了某一筆）。
+ */
+export async function getAnalysisById(
+  userId: number,
+  id: number
+): Promise<AnalysisCache | null> {
+  try {
+    const db = await getDB();
+    const rows = await all<AnalysisCache>(
+      db,
+      "SELECT * FROM analysis_cache WHERE userId = ? AND id = ?",
+      [userId, id]
+    );
+    return rows.length ? rows[0] : null;
+  } catch {
+    return null;
   }
 }
 

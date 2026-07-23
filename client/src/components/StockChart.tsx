@@ -47,6 +47,10 @@ export function StockChart({ data, symbol, chartType, timeframe, isLoading }: St
   // 根據時段過濾資料（改用「交易日數」slice，避免時區/盤後導致時間視窗算錯而空白）
   const filteredData = useMemo(() => {
     if (!data.length) return [];
+    // K 線圖至少需要 2 根才能正確呈現（否則 ECharts 會退化成單根怪線）。
+    // 若切到 K 線但當前時段過濾後只剩 1 筆（例如 1D 只有一根日 K），
+    // 直接退回全部資料，保證 K 線可視。
+    const minForCandle = chartType === "candlestick" ? 2 : 1;
 
     // 各時段對應的交易日數（data 已由舊到新排序）
     const dayCount: Record<string, number> = {
@@ -57,8 +61,9 @@ export function StockChart({ data, symbol, chartType, timeframe, isLoading }: St
       "1Y": 250,
     };
     const n = dayCount[timeframe] ?? data.length;
-    return data.slice(-n);
-  }, [data, timeframe]);
+    const sliced = data.slice(-n);
+    return sliced.length >= minForCandle ? sliced : data;
+  }, [data, timeframe, chartType]);
 
   // 計算均線
   const maDataMap = useMemo(() => {

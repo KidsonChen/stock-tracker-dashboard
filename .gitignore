@@ -110,6 +110,9 @@ temp/
 data/stock.db
 data/stock.db.wal
 data/stock.db.corrupt.*
+data/stock.db.recovered.*
+# Single-instance guard lock file (regenerated on startup, holds live PID)
+data/.server.lock
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/

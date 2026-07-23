@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2, TrendingUp, TrendingDown, Aler
 import { useState } from "react";
 import { StockChart } from "@/components/StockChart";
 import { StreamingAnalysis } from "@/components/StreamingAnalysis";
+import { StockInfoPanel } from "@/components/StockInfoPanel";
 import { useStockQuote, useStockHistory } from "@/hooks/useStockData";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -33,7 +34,7 @@ export default function Home() {
   const [stockInput, setStockInput] = useState("");
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
   const [selectedMarket, setSelectedMarket] = useState<Market>("TW");
-  const [timeframe, setTimeframe] = useState("1D");
+  const [timeframe, setTimeframe] = useState("1Y");
   const [chartType, setChartType] = useState("line");
 
   const { data: watchlistData, isLoading: watchlistLoading, refetch: refetchWatchlist } = trpc.watchlist.list.useQuery();
@@ -276,6 +277,10 @@ export default function Home() {
                 ))}
               </div>
             </Card>
+          )}
+
+          {currentStock && (
+            <StockInfoPanel symbol={currentStock} market={currentMarket} />
           )}
 
           <StreamingAnalysis symbol={currentStock} market={currentMarket} />

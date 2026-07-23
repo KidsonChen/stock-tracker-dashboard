@@ -245,7 +245,7 @@ const resolveModel = (model?: string) => {
     return ENV.routerAiModel;
   }
 
-  return "openrouter/auto";
+  return "openrouter/free";
 };
 
 const normalizeResponseFormat = ({

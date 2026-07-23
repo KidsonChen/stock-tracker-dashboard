@@ -14,7 +14,7 @@ export const ENV = {
     process.env.ROUTER_AI_BASE_URL?.replace(/\/$/, "") ??
     "https://openrouter.ai/api/v1",
   routerAiModel:
-    process.env.ROUTER_AI_MODEL ?? "openrouter/auto",
+    process.env.ROUTER_AI_MODEL ?? "openrouter/free",
 };
 
 export function isRouterAiConfigured(): boolean {

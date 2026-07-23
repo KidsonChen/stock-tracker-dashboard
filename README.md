@@ -139,7 +139,7 @@ pnpm start      # 以 production 模式啟動（NODE_ENV=production，提供 dis
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | 舊版 Supabase 後端（目前預設未使用） | — |
 | `ROUTER_AI_API_KEY` | Router AI / OpenRouter / Forge 的 API key（啟用 AI 分析必填） | — |
 | `ROUTER_AI_BASE_URL` | AI 後端基礎網址 | `https://openrouter.ai/api/v1` |
-| `ROUTER_AI_MODEL` | 指定的 AI 模型 | `openrouter/auto` |
+| `ROUTER_AI_MODEL` | 指定的 AI 模型 | `openrouter/free` |
 | `FORGE_API_KEY` / `FORGE_API_URL` | 舊版 Manus/Forge 後端（選用回退） | — |
 | `NODE_ENV` | `development` / `production` | `production` |
 | `PORT` | 伺服器偏好 port（佔用時自動往後找） | `3000` |

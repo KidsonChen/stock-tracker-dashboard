@@ -20,12 +20,27 @@ export interface YahooCandle {
 
 export interface YahooQuote {
   symbol: string;
+  name: string; // 公司名（shortName / longName）
   currentPrice: number;
   open: number;
   high: number;
   low: number;
   previousClose: number;
+  volume: number;
   timestamp: number;
+  fiftyTwoWeekHigh: number;
+  fiftyTwoWeekLow: number;
+  currency: string;
+  exchange: string;
+}
+
+export interface YahooValuation {
+  marketCap: number | null;
+  peRatio: number | null; // 本益比 (trailingPE)
+  forwardPE: number | null;
+  dividendYield: number | null; // 殖利率 (trailingAnnualDividendYield %)
+  fiftyTwoWeekHigh: number | null;
+  fiftyTwoWeekLow: number | null;
 }
 
 const BASE = "https://query1.finance.yahoo.com/v8/finance/chart";
@@ -62,12 +77,18 @@ export async function getYahooQuote(symbol: string): Promise<YahooQuote> {
 
   return {
     symbol: symbol.toUpperCase(),
+    name: String(meta?.shortName || meta?.longName || symbol).trim(),
     currentPrice: num(meta?.regularMarketPrice) || close,
     open: open || num(meta?.regularMarketOpen),
     high: high || num(meta?.regularMarketDayHigh),
     low: low || num(meta?.regularMarketDayLow),
     previousClose: num(meta?.chartPreviousClose) || num(meta?.previousClose),
+    volume: num(quotes?.volume?.[lastIdx]),
     timestamp: Date.now(),
+    fiftyTwoWeekHigh: num(meta?.fiftyTwoWeekHigh),
+    fiftyTwoWeekLow: num(meta?.fiftyTwoWeekLow),
+    currency: String(meta?.currency || ""),
+    exchange: String(meta?.exchangeName || ""),
   };
 }
 
@@ -107,4 +128,32 @@ export async function getYahooCandles(
   // 由舊到新排序並取最近 N 筆
   candles.sort((a, b) => (a.date < b.date ? -1 : 1));
   return candles.slice(-days);
+}
+
+const SUMMARY_BASE = "https://query1.finance.yahoo.com/v10/finance/quoteSummary";
+
+/** 估值/基本面（本益比、市值、殖利率、52週高低）——免 key */
+export async function getYahooValuation(symbol: string): Promise<YahooValuation> {
+  try {
+    const url = `${SUMMARY_BASE}/${encodeURIComponent(symbol)}?modules=price,summaryDetail,defaultKeyStatistics`;
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) throw new Error(`Yahoo summary HTTP ${res.status}`);
+    const json = await res.json();
+    const price = json?.quoteSummary?.result?.[0]?.price || {};
+    const summary = json?.quoteSummary?.result?.[0]?.summaryDetail || {};
+    return {
+      marketCap: num(price.marketCap?.raw ?? price.marketCap),
+      peRatio: num(summary.trailingPE?.raw ?? summary.trailingPE),
+      forwardPE: num(summary.forwardPE?.raw ?? summary.forwardPE),
+      dividendYield: num(summary.dividendYield?.raw ?? summary.dividendYield),
+      fiftyTwoWeekHigh: num(price.fiftyTwoWeekHigh?.raw ?? price.fiftyTwoWeekHigh),
+      fiftyTwoWeekLow: num(price.fiftyTwoWeekLow?.raw ?? price.fiftyTwoWeekLow),
+    };
+  } catch (e) {
+    console.error(`[Yahoo] getYahooValuation failed for ${symbol}:`, (e as Error).message);
+    return {
+      marketCap: null, peRatio: null, forwardPE: null,
+      dividendYield: null, fiftyTwoWeekHigh: null, fiftyTwoWeekLow: null,
+    };
+  }
 }
