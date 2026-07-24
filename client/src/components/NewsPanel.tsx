@@ -14,6 +14,7 @@ interface NewsGroup {
   industry: string;
   query: string;
   items: NewsItem[];
+  error?: string;
 }
 
 const INDUSTRY_COLOR: Record<string, string> = {

@@ -17,7 +17,7 @@ interface AnalysisSection {
 }
 
 interface StreamChunk {
-  type: "text" | "section_start" | "section_end" | "complete" | "error" | "cached";
+  type: "text" | "section_start" | "section_end" | "complete" | "error" | "cached" | "status";
   content?: string;
   title?: string;
   message?: string;
@@ -90,15 +90,16 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
       // 即時累積的區塊狀態
       let currentSection: AnalysisSection | null = null;
       const flush = () => {
-        if (currentSection) {
+        const sec = currentSection;
+        if (sec) {
           setSections((prev) => {
-            const idx = prev.findIndex((s) => s.title === currentSection!.title && !s.isComplete);
+            const idx = prev.findIndex((s) => s.title === sec.title && !s.isComplete);
             if (idx >= 0) {
               const copy = [...prev];
-              copy[idx] = { ...currentSection };
+              copy[idx] = { ...sec };
               return copy;
             }
-            return [...prev, { ...currentSection }];
+            return [...prev, { ...sec }];
           });
         }
       };
@@ -276,7 +277,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
       ) : null}
 
       {/* 載入狀態 */}
-      {(isAnalyzing || isLoading) && sections.length === 0 && (
+      {isAnalyzing && sections.length === 0 && (
         <div className="p-4 bg-background rounded border border-border text-center">
           <div className="flex items-center justify-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
