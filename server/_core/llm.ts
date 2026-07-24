@@ -331,6 +331,9 @@ const fetchWithBackoff = async (
     try {
       const response = await fetch(url, {
         ...init,
+        // 單次請求 25s 超時，避免 OpenRouter 卡住時 fetch 永遠掛起
+        // （Cloudflare Workers 環境出口到外部 LLM 有時會無回應，必須有 timeout）
+        signal: (init as any).signal ?? AbortSignal.timeout(25000),
         headers: {
           ...(init.headers ?? {}),
           authorization: `Bearer ${apiKey}`,

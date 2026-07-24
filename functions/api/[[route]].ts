@@ -106,6 +106,9 @@ async function handleAnalysisStream(context: {
           }
         }
 
+        // 立即通知前端已連線、準備呼叫 AI（避免「完全沒反應」的錯覺）
+        send({ type: "status", message: "正在連線 AI 模型，請稍候…" });
+
         // 準備報價/籌碼（簡化：直接呼叫 generator，它內部自己抓）
         let fullReport = "";
         for await (const chunk of streamDetailedAnalysis(

@@ -27,6 +27,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [sections, setSections] = useState<AnalysisSection[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [isCached, setIsCached] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -60,6 +61,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
   const runAnalysis = async (force: boolean) => {
     setIsAnalyzing(true);
     setError(null);
+    setStatus(null);
     setIsCached(false);
     setSections([]);
     setShowHistory(false);
@@ -120,7 +122,9 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
             continue;
           }
 
-          if (chunk.type === "cached") {
+          if (chunk.type === "status") {
+            setStatus(chunk.message || "處理中…");
+          } else if (chunk.type === "cached") {
             setIsCached(true);
             setSections([{ title: "快取分析結果", content: chunk.content || "", isComplete: true }]);
             setIsAnalyzing(false);
@@ -272,12 +276,12 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
       ) : null}
 
       {/* 載入狀態 */}
-      {isAnalyzing && sections.length === 0 && (
+      {(isAnalyzing || isLoading) && sections.length === 0 && (
         <div className="p-4 bg-background rounded border border-border text-center">
           <div className="flex items-center justify-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
             <span className="text-xs text-muted-foreground">
-              [ 正在分析股票 {symbol}... ]
+              {status || `[ 正在分析股票 ${symbol}... ]`}
             </span>
           </div>
         </div>
