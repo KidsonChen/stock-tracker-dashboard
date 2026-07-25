@@ -3,8 +3,8 @@
  * 提供離線支援和資源快取
  */
 
-const CACHE_NAME = 'stock-tracker-v1';
-const RUNTIME_CACHE = 'stock-tracker-runtime-v1';
+const CACHE_NAME = 'stock-tracker-v2';
+const RUNTIME_CACHE = 'stock-tracker-runtime-v2';
 
 // 需要快取的資源
 const STATIC_ASSETS = [
@@ -66,6 +66,24 @@ self.addEventListener('fetch', (event) => {
         .catch(() => {
           return caches.match(request);
         })
+    );
+    return;
+  }
+
+  // HTML / 導覽請求使用 Network First：避免部署新版後使用者一直拿到舊 bundle
+  if (request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const clonedResponse = response.clone();
+          if (response.ok) {
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, clonedResponse);
+            });
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
     );
     return;
   }
