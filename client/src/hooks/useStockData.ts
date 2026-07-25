@@ -120,6 +120,49 @@ export interface StockExtraData {
     dealerNet: number;
   } | null;
   recentCandles?: { date: string; close: number; volume: number }[];
+  indicators?: {
+    ema12: number;
+    ema26: number;
+    macd: number;
+    macdSignal: number;
+    macdHist: number;
+    rsi14: number;
+    kdK: number;
+    kdD: number;
+    bollUpper: number;
+    bollMid: number;
+    bollLower: number;
+    bollPercentB: number;
+    bias20: number;
+    volumeRatio5: number;
+    signals: string[];
+  } | null;
+  fundamentals?: {
+    symbol: string;
+    companyName: string;
+    industry: string;
+    monthlyRevenue: {
+      yearMonth: string;
+      revenue: number;
+      lastMonthRevenue: number;
+      lastYearRevenue: number;
+      momPct: number;
+      yoyPct: number;
+      ytdRevenue: number;
+      ytdYoyPct: number;
+      note: string;
+    } | null;
+    quarterlyEps: {
+      year: string;
+      quarter: string;
+      eps: number;
+      revenue: number;
+      operatingIncome: number;
+      netIncome: number;
+      netMarginPct: number;
+      opMarginPct: number;
+    } | null;
+  } | null;
 }
 
 export function useStockExtra(symbol: string | null, market?: string) {

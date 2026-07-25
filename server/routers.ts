@@ -406,24 +406,51 @@ export const appRouter = router({
             result.name = sym;
           }
           try {
-            const candles = await getTWSECandles(sym, 5);
+            const candles = await getTWSECandles(sym, 250);
             if (candles.length) {
               const last = candles[candles.length - 1];
               result.orderBook = estimateOrderBook(
                 sym, Number(last.close), Number(last.open), Number(last.high), Number(last.low), Number(last.volume)
               );
               // 近 5 日走勢（技術面動能），籌碼暫缺時作為替代指標
-              result.recentCandles = candles.map((c: any) => ({
+              result.recentCandles = candles.slice(-5).map((c: any) => ({
                 date: String(c.date),
                 close: Number(c.close || 0),
                 volume: Number(c.volume || 0),
               }));
+              // 進階技術指標（MACD/RSI/KD/布林/乖離/量比）
+              try {
+                const { calculateAdvancedIndicators } = await import("./ma-analysis");
+                result.indicators = calculateAdvancedIndicators(candles as any);
+              } catch (e) {
+                console.error("[Stock] getExtra indicators failed:", (e as Error).message);
+              }
             }
           } catch (e) {
             console.error("[Stock] getExtra orderBook failed:", (e as Error).message);
           }
           result.margin = await getMargin(sym);
           result.foreignTrade = await getForeignTrade(sym);
+          // 基本面（月營收 + 季 EPS，TWSE OpenAPI 月更/季更 → 快取 24h）
+          try {
+            const FUND_TTL = 24 * 60 * 60 * 1000;
+            const cached = await getAnalysisCache(0, sym, "fundamentals");
+            const age = cached ? Date.now() - new Date(cached.createdAt.replace(" ", "T") + "Z").getTime() : Infinity;
+            if (cached && age < FUND_TTL) {
+              result.fundamentals = JSON.parse(cached.result);
+            } else {
+              const { getFundamentals } = await import("./fundamentals");
+              const f = await getFundamentals(sym);
+              if (f) {
+                result.fundamentals = f;
+                saveAnalysisCache(0, sym, "fundamentals", JSON.stringify(f)).catch(() => {});
+              } else if (cached) {
+                result.fundamentals = JSON.parse(cached.result); // 過期舊資料仍優於沒有
+              }
+            }
+          } catch (e) {
+            console.error("[Stock] getExtra fundamentals failed:", (e as Error).message);
+          }
         } else {
           // 美股 / 港股：Yahoo Finance（免 key）
           try {

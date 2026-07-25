@@ -90,6 +90,13 @@ async function handleAnalysisStream(context: {
           encoder.encode(`data: ${JSON.stringify(obj)}\n\n`)
         );
       };
+      // 心跳：LLM 呼叫為一次性（非串流），每段可能 20-60 秒無輸出，
+      // 中間層（瀏覽器/代理/CDN）可能因 idle 斷線 → 每 10 秒送 SSE comment 保活。
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: ping\n\n`));
+        } catch { /* stream closed */ }
+      }, 10000);
       try {
         const { streamDetailedAnalysis } = await import("../../server/llm-stream");
         // 快取檢查
@@ -138,6 +145,7 @@ async function handleAnalysisStream(context: {
           message: `分析失敗: ${err instanceof Error ? err.message : "未知錯誤"}`,
         });
       } finally {
+        clearInterval(heartbeat);
         controller.close();
       }
     },

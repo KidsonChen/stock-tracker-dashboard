@@ -89,19 +89,32 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
 
       // 即時累積的區塊狀態
       let currentSection: AnalysisSection | null = null;
-      const flush = () => {
+      // 節流 flush：逐字 setState 會讓長報告觸發數千次重渲染（Streamdown 每次都重新
+      // 解析 markdown），導致頁面卡死。改為最多每 120ms 更新一次畫面。
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      const doFlush = () => {
+        flushTimer = null;
         const sec = currentSection;
         if (sec) {
+          const snapshot = { ...sec };
           setSections((prev) => {
-            const idx = prev.findIndex((s) => s.title === sec.title && !s.isComplete);
+            const idx = prev.findIndex((s) => s.title === snapshot.title && !s.isComplete);
             if (idx >= 0) {
               const copy = [...prev];
-              copy[idx] = { ...sec };
+              copy[idx] = snapshot;
               return copy;
             }
-            return [...prev, { ...sec }];
+            return [...prev, snapshot];
           });
         }
+      };
+      const flush = (immediate = false) => {
+        if (immediate) {
+          if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+          doFlush();
+          return;
+        }
+        if (!flushTimer) flushTimer = setTimeout(doFlush, 120);
       };
 
       while (true) {
@@ -139,7 +152,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
           } else if (chunk.type === "section_end") {
             if (currentSection) {
               currentSection.isComplete = true;
-              flush();
+              flush(true);
               currentSection = null;
             }
           } else if (chunk.type === "error") {
@@ -148,7 +161,7 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
           } else if (chunk.type === "complete") {
             if (currentSection) {
               currentSection.isComplete = true;
-              flush();
+              flush(true);
               currentSection = null;
             }
             setIsAnalyzing(false);
@@ -158,7 +171,17 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
       setIsAnalyzing(false);
     } catch (e: any) {
       if (e.name !== "AbortError") {
-        setError(e.message || "分析失敗");
+        // 串流中斷：若已收到部分內容則保留並提示，避免整片消失
+        setSections((prev) => {
+          if (prev.length > 0) {
+            setError("連線中斷，以下為已完成的部分分析。可按「重新分析」補完。");
+            return prev.map((s) => ({ ...s, isComplete: true }));
+          }
+          setError(e.message === "network error" || e.message?.includes("Failed to fetch")
+            ? "連線中斷（網路或伺服器逾時），請再按一次「生成詳細分析」"
+            : e.message || "分析失敗");
+          return prev;
+        });
       }
       setIsAnalyzing(false);
     }

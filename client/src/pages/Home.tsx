@@ -94,7 +94,7 @@ export default function Home() {
         } overflow-hidden`}
       >
         <div className="p-4 border-b border-border">
-          <div className="text-sm font-bold neon-glow mb-4">[ 追蹤清單 ]</div>
+          <div className="section-head mb-4 text-sm">追蹤清單</div>
           <div className="flex gap-2">
             <select
               value={selectedMarket}
@@ -138,16 +138,16 @@ export default function Home() {
                   setSelectedStock(stock.symbol);
                   setSelectedMarket((stock.market || "TW") as Market);
                 }}
-                className={`p-3 rounded cursor-pointer transition-colors border ${
+                className={`p-3 rounded-lg cursor-pointer transition-colors border ${
                   selectedStock === stock.symbol && (stock.market || "TW") === currentMarket
-                    ? "bg-card border-primary text-primary"
+                    ? "bg-card border-primary"
                     : "bg-transparent border-border hover:bg-card/50"
                 }`}
               >
                 <div className="flex justify-between items-start mb-1">
-                  <span className="font-bold text-sm">
+                  <span className="font-bold text-sm tracking-tight">
                     {stock.symbol}
-                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                    <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
                       {marketLabel(stock.market)}
                     </span>
                   </span>
@@ -157,16 +157,16 @@ export default function Home() {
                       handleRemoveStock(stock.symbol);
                     }}
                     disabled={removeMutation.isPending}
-                    className="text-destructive hover:text-destructive/80 disabled:opacity-50"
+                    className="text-muted-foreground hover:text-destructive disabled:opacity-50 transition-colors"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
                 </div>
                 {selectedStock === stock.symbol && quote && (
                   <>
-                    <div className="text-xs text-muted-foreground">${quote.currentPrice.toFixed(2)}</div>
+                    <div className="tnum text-xs text-right text-muted-foreground">{quote.currentPrice.toFixed(2)}</div>
                     <div
-                      className={`text-xs font-semibold flex items-center gap-1 ${
+                      className={`tnum text-xs font-semibold flex items-center justify-end gap-1 ${
                         quote.change >= 0 ? "text-chart-1" : "text-destructive"
                       }`}
                     >
@@ -192,9 +192,9 @@ export default function Home() {
             </button>
             {currentStock && quote ? (
               <div>
-                <h1 className="text-2xl font-bold neon-glow">{currentStock}</h1>
-                <p className="text-xs text-muted-foreground">
-                  ${quote.currentPrice.toFixed(2)} {quote.change >= 0 ? "+" : ""}
+                <h1 className="text-2xl font-bold tracking-tight">{currentStock}</h1>
+                <p className="tnum text-xs text-muted-foreground">
+                  {quote.currentPrice.toFixed(2)} {quote.change >= 0 ? "+" : ""}
                   {quote.change.toFixed(2)} ({quote.changePercent.toFixed(2)}%)
                 </p>
               </div>
@@ -209,8 +209,8 @@ export default function Home() {
 
         <div className="flex-1 overflow-auto p-4 space-y-4">
           {!currentStock ? (
-            <Card className="bg-card border-border p-8 text-center">
-              <div className="text-foreground text-xl neon-glow font-bold mb-2">[ 股市追蹤儀表板 ]</div>
+            <Card className="bg-card border-border p-10 text-center">
+              <div className="brand-glow text-foreground text-xl font-bold mb-2 tracking-tight">股市追蹤儀表板</div>
               <p className="text-muted-foreground">請在左側新增股票代號以開始追蹤，或點選既有的自選股。</p>
             </Card>
           ) : (
@@ -226,7 +226,7 @@ export default function Home() {
 
           <Card className="bg-card border-border p-4">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">[ 股價走勢 ]</h2>
+              <h2 className="section-head">股價走勢</h2>
               <div className="flex gap-2">
                 <Tabs value={timeframe} onValueChange={setTimeframe} className="w-auto">
                   <TabsList className="bg-input border-border">
@@ -260,17 +260,17 @@ export default function Home() {
 
           {quote && (
             <Card className="bg-card border-border p-4">
-              <h2 className="text-lg font-bold mb-4">[ 基本資料 ]</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <h2 className="section-head mb-4">基本資料</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { label: "開盤價", value: "$" + quote.open.toFixed(2) },
-                  { label: "收盤價", value: "$" + quote.currentPrice.toFixed(2) },
-                  { label: "最高價", value: "$" + quote.high.toFixed(2) },
-                  { label: "最低價", value: "$" + quote.low.toFixed(2) },
+                  { label: "開盤價", value: quote.open.toFixed(2) },
+                  { label: "收盤價", value: quote.currentPrice.toFixed(2) },
+                  { label: "最高價", value: quote.high.toFixed(2) },
+                  { label: "最低價", value: quote.low.toFixed(2) },
                 ].map((item) => (
-                  <div key={item.label} className="border border-border rounded p-3 bg-background">
+                  <div key={item.label} className="border border-border rounded-lg p-3 bg-background">
                     <div className="text-xs text-muted-foreground mb-1">{item.label}</div>
-                    <div className="text-lg font-bold text-primary">{item.value}</div>
+                    <div className="tnum text-lg font-semibold text-foreground text-right">{item.value}</div>
                   </div>
                 ))}
               </div>

@@ -62,7 +62,7 @@
   --secondary: oklch(0.15 0.03 260);
   --secondary-foreground: oklch(0.75 0.06 150);
   --muted: oklch(0.2 0.02 260);
-  --muted-foreground: oklch(0.6 0.04 150);
+  --muted-foreground: oklch(0.7 0.035 150);
   --accent: oklch(0.8 0.3 150);
   --accent-foreground: oklch(0.08 0.01 0);
   --destructive: oklch(0.6 0.25 30);
@@ -92,7 +92,7 @@
   --secondary: oklch(0.15 0.03 260);
   --secondary-foreground: oklch(0.75 0.06 150);
   --muted: oklch(0.2 0.02 260);
-  --muted-foreground: oklch(0.6 0.04 150);
+  --muted-foreground: oklch(0.7 0.035 150);
   --accent: oklch(0.8 0.3 150);
   --accent-foreground: oklch(0.08 0.01 0);
   --destructive: oklch(0.6 0.25 30);
@@ -146,6 +146,28 @@
 }
 
 @layer components {
+  /* Numeric data should be tabular + right-aligned for scannability */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* Unified section heading: green accent bar + label, replaces scattered [ xxx ] glow titles */
+  .section-head {
+    @apply flex items-center gap-2 text-base font-bold tracking-tight text-foreground;
+  }
+  .section-head::before {
+    content: "";
+    @apply inline-block h-4 w-1 rounded-sm bg-primary;
+    box-shadow: 0 0 8px color-mix(in oklch, var(--primary), transparent 30%);
+  }
+
+  /* Brand wordmark: keep the neon glow here only, not on every title */
+  .brand-glow {
+    text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+
   /**
    * Custom container utility that centers content and adds responsive padding.
    *

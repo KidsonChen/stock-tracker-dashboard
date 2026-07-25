@@ -267,3 +267,144 @@ ${signals.length > 0 ? signals.map(s => `• ${s}`).join('\n') : '• 無明顯�
 ${description}
   `.trim();
 }
+
+// ═══════════════════════════════════════════════════════════
+// 進階技術指標：EMA / MACD / RSI / KD / 布林通道 / 乖離率 / ADX-lite
+// 純數學計算，零外部依賴，供 LLM prompt 注入與前端指標卡使用。
+// ═══════════════════════════════════════════════════════════
+
+export interface AdvancedIndicators {
+  ema12: number;
+  ema26: number;
+  macd: number;         // DIF = EMA12 - EMA26
+  macdSignal: number;   // DEA = EMA9 of DIF
+  macdHist: number;     // 柱狀 = DIF - DEA
+  rsi14: number;        // 0-100
+  kdK: number;          // 0-100
+  kdD: number;          // 0-100
+  bollUpper: number;
+  bollMid: number;      // = MA20
+  bollLower: number;
+  bollPercentB: number; // 價格在布林通道的位置 0~1（可超出）
+  bias20: number;       // 20日乖離率 %
+  volumeRatio5: number; // 今日量 / 5日均量
+  signals: string[];    // 由指標推導的文字信號
+}
+
+function emaSeries(values: number[], period: number): number[] {
+  if (values.length === 0) return [];
+  const k = 2 / (period + 1);
+  const out: number[] = [values[0]];
+  for (let i = 1; i < values.length; i++) {
+    out.push(values[i] * k + out[i - 1] * (1 - k));
+  }
+  return out;
+}
+
+const rnd = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
+
+/** 計算進階技術指標（需要至少 ~30 根 K 線，200 根更佳） */
+export function calculateAdvancedIndicators(candles: CandleData[]): AdvancedIndicators | null {
+  if (candles.length < 30) return null;
+  const closes = candles.map((c) => c.close);
+  const last = candles[candles.length - 1];
+  const price = last.close;
+
+  // EMA / MACD
+  const e12 = emaSeries(closes, 12);
+  const e26 = emaSeries(closes, 26);
+  const difSeries = e12.map((v, i) => v - e26[i]);
+  const deaSeries = emaSeries(difSeries, 9);
+  const dif = difSeries[difSeries.length - 1];
+  const dea = deaSeries[deaSeries.length - 1];
+  const hist = dif - dea;
+  const prevHist = difSeries[difSeries.length - 2] - deaSeries[deaSeries.length - 2];
+
+  // RSI14 (Wilder smoothing)
+  let gain = 0, loss = 0;
+  for (let i = closes.length - 14; i < closes.length; i++) {
+    const chg = closes[i] - closes[i - 1];
+    if (chg >= 0) gain += chg; else loss -= chg;
+  }
+  const rsi = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+
+  // KD (9,3,3)
+  let k = 50, d = 50;
+  for (let i = Math.max(8, candles.length - 60); i < candles.length; i++) {
+    const win = candles.slice(i - 8, i + 1);
+    const hi = Math.max(...win.map((c) => c.high));
+    const lo = Math.min(...win.map((c) => c.low));
+    const rsv = hi === lo ? 50 : ((candles[i].close - lo) / (hi - lo)) * 100;
+    k = (2 / 3) * k + (1 / 3) * rsv;
+    d = (2 / 3) * d + (1 / 3) * k;
+  }
+
+  // 布林通道 (20, 2σ)
+  const w20 = closes.slice(-20);
+  const mid = w20.reduce((a, b) => a + b, 0) / 20;
+  const sd = Math.sqrt(w20.reduce((a, b) => a + (b - mid) ** 2, 0) / 20);
+  const upper = mid + 2 * sd;
+  const lower = mid - 2 * sd;
+  const pctB = upper === lower ? 0.5 : (price - lower) / (upper - lower);
+
+  // 20日乖離率
+  const bias20 = ((price - mid) / mid) * 100;
+
+  // 量比（今日量 / 前5日均量）
+  const vols = candles.map((c) => c.volume);
+  const avgVol5 = vols.slice(-6, -1).reduce((a, b) => a + b, 0) / 5;
+  const volumeRatio5 = avgVol5 > 0 ? last.volume / avgVol5 : 1;
+
+  // 文字信號
+  const signals: string[] = [];
+  if (hist > 0 && prevHist <= 0) signals.push("MACD 柱狀由負轉正（黃金交叉初現）");
+  if (hist < 0 && prevHist >= 0) signals.push("MACD 柱狀由正轉負（死亡交叉初現）");
+  if (dif > dea && dif > 0) signals.push("MACD 多頭排列（DIF > DEA > 0）");
+  if (dif < dea && dif < 0) signals.push("MACD 空頭排列（DIF < DEA < 0）");
+  if (rsi >= 70) signals.push(`RSI ${rnd(rsi, 1)} 進入超買區（≥70），短線過熱注意回檔`);
+  else if (rsi <= 30) signals.push(`RSI ${rnd(rsi, 1)} 進入超賣區（≤30），短線乖離過大`);
+  if (k > 80 && d > 80) signals.push("KD 高檔鈍化（K、D > 80），強勢但注意轉折");
+  else if (k < 20 && d < 20) signals.push("KD 低檔鈍化（K、D < 20），弱勢但接近反彈區");
+  if (pctB > 1) signals.push("價格突破布林上軌，波動放大（強勢或超漲）");
+  else if (pctB < 0) signals.push("價格跌破布林下軌，波動放大（弱勢或超跌）");
+  if (Math.abs(bias20) > 10) signals.push(`20日乖離率 ${rnd(bias20, 1)}%，乖離偏大注意均值回歸`);
+  if (volumeRatio5 >= 2) signals.push(`成交量放大至 5 日均量的 ${rnd(volumeRatio5, 1)} 倍（量增訊號）`);
+  else if (volumeRatio5 <= 0.5) signals.push("成交量萎縮至 5 日均量一半以下（量縮觀望）");
+
+  return {
+    ema12: rnd(e12[e12.length - 1]),
+    ema26: rnd(e26[e26.length - 1]),
+    macd: rnd(dif, 3),
+    macdSignal: rnd(dea, 3),
+    macdHist: rnd(hist, 3),
+    rsi14: rnd(rsi, 1),
+    kdK: rnd(k, 1),
+    kdD: rnd(d, 1),
+    bollUpper: rnd(upper),
+    bollMid: rnd(mid),
+    bollLower: rnd(lower),
+    bollPercentB: rnd(pctB, 2),
+    bias20: rnd(bias20, 2),
+    volumeRatio5: rnd(volumeRatio5, 2),
+    signals,
+  };
+}
+
+/** 進階指標 → LLM 文本 */
+export function formatAdvancedIndicatorsForLLM(ind: AdvancedIndicators): string {
+  return `
+【動量與震盪指標】
+MACD：DIF=${ind.macd}、DEA=${ind.macdSignal}、柱狀=${ind.macdHist}（${ind.macdHist >= 0 ? "多方" : "空方"}）
+RSI(14)：${ind.rsi14}（>70 超買、<30 超賣）
+KD(9,3,3)：K=${ind.kdK}、D=${ind.kdD}
+EMA12：${ind.ema12}、EMA26：${ind.ema26}
+
+【波動指標】
+布林通道(20,2σ)：上軌 ${ind.bollUpper} / 中軌 ${ind.bollMid} / 下軌 ${ind.bollLower}，%B=${ind.bollPercentB}
+20日乖離率：${ind.bias20}%
+量比（今日/5日均量）：${ind.volumeRatio5}
+
+【指標信號】
+${ind.signals.length ? ind.signals.map((s) => `• ${s}`).join("\n") : "• 各指標中性，無極端信號"}
+  `.trim();
+}

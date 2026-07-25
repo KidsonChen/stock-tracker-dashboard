@@ -15,7 +15,7 @@ export function Navbar() {
     <nav className="sticky top-0 z-50 w-full border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-4">
         <Link href="/" className="mr-4 flex items-center gap-2 shrink-0">
-          <span className="text-base font-bold neon-glow">股市追蹤儀表板</span>
+          <span className="brand-glow text-base font-bold tracking-tight">股市追蹤儀表板</span>
         </Link>
         <div className="flex items-center gap-1">
           {NAV.map(({ path, label, icon: Icon }) => {
