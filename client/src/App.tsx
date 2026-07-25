@@ -9,6 +9,7 @@ import Home from "./pages/Home";
 import IndustryPage from "./pages/IndustryPage";
 import NewsPage from "./pages/NewsPage";
 import MacroPage from "./pages/MacroPage";
+import PortfolioPage from "./pages/PortfolioPage";
 
 function Router() {
   return (
@@ -17,6 +18,7 @@ function Router() {
       <Route path={"/industry"} component={IndustryPage} />
       <Route path={"/news"} component={NewsPage} />
       <Route path={"/macro"} component={MacroPage} />
+      <Route path={"/portfolio"} component={PortfolioPage} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

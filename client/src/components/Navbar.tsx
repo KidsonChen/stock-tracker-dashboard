@@ -1,8 +1,9 @@
 import { Link, useLocation } from "wouter";
-import { LineChart, BarChart3, MessagesSquare, Newspaper } from "lucide-react";
+import { LineChart, BarChart3, MessagesSquare, Newspaper, Wallet } from "lucide-react";
 
 const NAV = [
   { path: "/", label: "個股追蹤", icon: LineChart },
+  { path: "/portfolio", label: "我的庫存", icon: Wallet },
   { path: "/industry", label: "產業分析", icon: BarChart3 },
   { path: "/news", label: "消息面", icon: Newspaper },
   { path: "/macro", label: "宏觀儀表板", icon: MessagesSquare },

@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { useStockExtra } from "@/hooks/useStockData";
 import { AlertCircle, Info } from "lucide-react";
+import { trpc } from "@/lib/trpc";
 
 interface StockInfoPanelProps {
   symbol: string;
@@ -311,6 +312,77 @@ export function StockInfoPanel({ symbol, market }: StockInfoPanelProps) {
           </Card>
         );
       })()}
+
+      {/* 集保戶股權分散表（TDCC，僅台股） */}
+      {isTW && <ShareholdingCard symbol={symbol} />}
     </div>
+  );
+}
+
+/** 集保戶股權分散表卡（TDCC OpenAPI 週更資料） */
+function ShareholdingCard({ symbol }: { symbol: string }) {
+  const { data: resp, isLoading } = trpc.getShareholding.useQuery(
+    { symbol },
+    { staleTime: 10 * 60 * 1000, retry: 1 }
+  );
+
+  const sh = resp?.data;
+  return (
+    <Card className="bg-card border-border p-4">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold">[ 集保股權分散 ]</h2>
+        {sh?.date && (
+          <span className="text-[10px] text-muted-foreground">
+            資料日期 {String(sh.date).replace(/(\d{4})(\d{2})(\d{2})/, "$1/$2/$3")}（每週更新）
+          </span>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="text-muted-foreground text-sm">[ 載入中（首次抓取約需 10-20 秒）... ]</div>
+      ) : !sh ? (
+        <div className="text-muted-foreground text-sm">
+          {(resp as any)?.error || "暫無集保股權分散資料"}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            {[
+              { label: "千張大戶", value: `${sh.bigLots1000.toFixed(2)}%`, hint: "持股 1,000 張以上比例" },
+              { label: "400 張以上", value: `${sh.bigLots400.toFixed(2)}%`, hint: "中實戶 + 大戶比例" },
+              { label: "10 張以下散戶", value: `${sh.retailUnder10.toFixed(2)}%`, hint: `${sh.retailHolders.toLocaleString("zh-TW")} 人` },
+              { label: "總股東人數", value: sh.totalHolders.toLocaleString("zh-TW"), hint: "集保 ID 歸戶" },
+            ].map((it) => (
+              <div key={it.label} className="border border-border rounded p-3 bg-background">
+                <div className="text-xs text-muted-foreground mb-1">{it.label}</div>
+                <div className="text-lg font-bold text-primary">{it.value}</div>
+                <div className="text-[10px] text-muted-foreground mt-1">{it.hint}</div>
+              </div>
+            ))}
+          </div>
+          {/* 15 級距長條圖 */}
+          <div className="space-y-1">
+            {sh.tiers.map((t: any) => (
+              <div key={t.level} className="flex items-center gap-2 text-xs">
+                <span className="w-24 shrink-0 text-muted-foreground text-right">{t.label}</span>
+                <div className="flex-1 h-3 bg-background border border-border rounded overflow-hidden">
+                  <div
+                    className={`h-full ${t.level >= 12 ? "bg-destructive/70" : t.level <= 3 ? "bg-chart-1/70" : "bg-primary/50"}`}
+                    style={{ width: `${Math.min(100, t.percent)}%` }}
+                  />
+                </div>
+                <span className="w-14 shrink-0 text-right font-mono">{t.percent.toFixed(2)}%</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <Info className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>
+              資料來源：臺灣集中保管結算所 OpenAPI（每週最後營業日結算，ID 歸戶）。紅色 = 400 張以上大戶級距、綠色 = 10 張以下散戶級距。
+              {resp?.fromCache && "（快取資料）"}
+            </span>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }

@@ -209,6 +209,89 @@ export async function getAnalysisById(
   }
 }
 
+// ---- 我的庫存（手動輸入持股）----
+export type Holding = {
+  id: number;
+  userId: number;
+  symbol: string;
+  market: string;
+  shares: number;    // 股數（1 張 = 1000 股）
+  avgCost: number;   // 平均成本（每股）
+  note?: string;
+  addedAt: string;
+  updatedAt: string;
+};
+
+const HOLDINGS_KEY = "holdings.json";
+
+export async function getHoldings(): Promise<Holding[]> {
+  try {
+    const obj = await getBucket().get(HOLDINGS_KEY);
+    if (!obj) return [];
+    const arr = (await obj.json<Holding[]>()) as Holding[];
+    return arr.filter((h) => h.userId === DEFAULT_USER);
+  } catch (e) {
+    console.error("[R2] getHoldings failed", e);
+    return [];
+  }
+}
+
+/** 新增或更新持股（同 symbol 覆寫股數/成本） */
+export async function upsertHolding(
+  symbol: string,
+  market: string,
+  shares: number,
+  avgCost: number,
+  note?: string
+): Promise<Holding> {
+  const bucket = getBucket();
+  const obj = await bucket.get(HOLDINGS_KEY);
+  const list: Holding[] = obj ? ((await obj.json()) as Holding[]) : [];
+  const up = symbol.toUpperCase();
+  const now = nowISO();
+  const existing = list.find((h) => h.userId === DEFAULT_USER && h.symbol === up);
+  let rec: Holding;
+  if (existing) {
+    existing.shares = shares;
+    existing.avgCost = avgCost;
+    existing.market = market;
+    existing.note = note;
+    existing.updatedAt = now;
+    rec = existing;
+  } else {
+    rec = {
+      id: list.length ? Math.max(...list.map((h) => h.id)) + 1 : 1,
+      userId: DEFAULT_USER,
+      symbol: up,
+      market,
+      shares,
+      avgCost,
+      note,
+      addedAt: now,
+      updatedAt: now,
+    };
+    list.push(rec);
+  }
+  await bucket.put(HOLDINGS_KEY, JSON.stringify(list));
+  return rec;
+}
+
+export async function removeHolding(symbol: string): Promise<void> {
+  try {
+    const bucket = getBucket();
+    const obj = await bucket.get(HOLDINGS_KEY);
+    if (!obj) return;
+    const list: Holding[] = (await obj.json()) as Holding[];
+    const up = symbol.toUpperCase();
+    await bucket.put(
+      HOLDINGS_KEY,
+      JSON.stringify(list.filter((h) => !(h.userId === DEFAULT_USER && h.symbol === up)))
+    );
+  } catch (e) {
+    console.error("[R2] removeHolding failed", e);
+  }
+}
+
 // ---- 相容樁位（routers 未使用）----
 export async function getStockDataBySymbol(_symbol: string, _limit = 100): Promise<any[]> {
   return [];

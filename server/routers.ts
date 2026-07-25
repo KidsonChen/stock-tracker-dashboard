@@ -11,7 +11,11 @@ import {
   isCacheExpired,
   listAnalysisHistory,
   getAnalysisById,
+  getHoldings,
+  upsertHolding,
+  removeHolding,
 } from "./db-r2";
+import { getShareholding as fetchTdccShareholding } from "./tdcc";
 import { getTWSECandles, getTWSEQuote } from "./twse-live";
 import { getValuation, estimateOrderBook, getMargin, getForeignTrade, getIndustryIndices as fetchIndustryIndices } from "./twse-extra";
 import { getYahooCandles, getYahooQuote, getYahooValuation } from "./yahoo";
@@ -42,6 +46,20 @@ const cleanTaiwanSymbol = (symbol: string) =>
 
 // 是否台股市場（依推斷結果）
 const isTaiwanMarket = (market: string) => market === "TW";
+
+// ---- 庫存頁密碼保護 ----
+// 密碼存於環境變數 PORTFOLIO_PASSWORD（Cloudflare Pages secret / 本地 .env）。
+// 未設定時視為未啟用保護（開發環境友善），但正式環境務必設定。
+function checkPortfolioPassword(password: string): boolean {
+  const expected = process.env.PORTFOLIO_PASSWORD;
+  if (!expected) return true; // 未設定 = 不啟用保護
+  return password === expected;
+}
+function assertPortfolioPassword(password: string): void {
+  if (!checkPortfolioPassword(password)) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "密碼錯誤" });
+  }
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -428,6 +446,113 @@ export const appRouter = router({
     }),
 
   ping: publicProcedure.query(() => ({ ok: true, ts: Date.now() })),
+
+  // 集保戶股權分散表（TDCC OpenAPI，週更；R2 快取 3 天，僅台股）
+  getShareholding: publicProcedure
+    .input(z.object({ symbol: z.string().min(1).max(10), forceRefresh: z.boolean().optional() }))
+    .query(async ({ input }) => {
+      const sym = cleanTaiwanSymbol(input.symbol);
+      if (!isTaiwanMarket(inferMarket(input.symbol))) {
+        return { data: null, fromCache: false, note: "股權分散表僅台股提供" };
+      }
+      const CACHE_TYPE = "tdcc";
+      const TDCC_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 週更資料，快取 3 天
+      try {
+        if (!input.forceRefresh) {
+          const cached = await getAnalysisCache(0, sym, CACHE_TYPE);
+          if (cached) {
+            const age = Date.now() - new Date(cached.createdAt.replace(" ", "T") + "Z").getTime();
+            if (age < TDCC_TTL_MS) {
+              return { data: JSON.parse(cached.result), fromCache: true };
+            }
+          }
+        }
+        const data = await fetchTdccShareholding(sym);
+        if (data) {
+          try {
+            await saveAnalysisCache(0, sym, CACHE_TYPE, JSON.stringify(data));
+          } catch (e) {
+            console.error("[TDCC] cache save failed:", (e as Error).message);
+          }
+        }
+        return { data, fromCache: false };
+      } catch (e) {
+        console.error("[TDCC] getShareholding failed:", (e as Error).message);
+        // 抓取失敗時回退舊快取（即使過期）
+        try {
+          const stale = await getAnalysisCache(0, sym, CACHE_TYPE);
+          if (stale) return { data: JSON.parse(stale.result), fromCache: true, stale: true };
+        } catch { /* ignore */ }
+        return { data: null, fromCache: false, error: `集保資料抓取失敗：${(e as Error).message}` };
+      }
+    }),
+
+  // 我的庫存（手動輸入持股 + 即時損益）
+  // 密碼保護：所有 holdings API 都要帶 password，與伺服器 PORTFOLIO_PASSWORD 比對。
+  holdings: router({
+    // 驗證密碼（前端進頁時先打這支）
+    auth: publicProcedure
+      .input(z.object({ password: z.string() }))
+      .mutation(async ({ input }) => {
+        return { ok: checkPortfolioPassword(input.password) };
+      }),
+
+    list: publicProcedure
+      .input(z.object({ password: z.string() }))
+      .query(async ({ input }) => {
+        assertPortfolioPassword(input.password);
+        const list = await getHoldings();
+      // 為每筆持股抓即時報價算損益（單檔失敗不影響整體）
+      const enriched = await Promise.all(
+        list.map(async (h) => {
+          let currentPrice: number | null = null;
+          try {
+            const mkt = inferMarket(h.symbol, h.market);
+            if (isTaiwanMarket(mkt)) {
+              const q = await getTWSEQuote(cleanTaiwanSymbol(h.symbol));
+              currentPrice = Number(q.currentPrice) || null;
+            } else {
+              const q = await getYahooQuote(h.symbol);
+              currentPrice = Number(q.currentPrice) || null;
+            }
+          } catch (e) {
+            console.error(`[Holdings] quote failed for ${h.symbol}:`, (e as Error).message);
+          }
+          const cost = h.shares * h.avgCost;
+          const marketValue = currentPrice != null ? h.shares * currentPrice : null;
+          const pnl = marketValue != null ? marketValue - cost : null;
+          const pnlPct = pnl != null && cost > 0 ? (pnl / cost) * 100 : null;
+          return { ...h, currentPrice, cost, marketValue, pnl, pnlPct };
+        })
+      );
+      return enriched;
+    }),
+
+    upsert: publicProcedure
+      .input(
+        z.object({
+          password: z.string(),
+          symbol: z.string().min(1).max(10),
+          market: z.string().optional(),
+          shares: z.number().positive(),
+          avgCost: z.number().nonnegative(),
+          note: z.string().max(100).optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        assertPortfolioPassword(input.password);
+        const market = inferMarket(input.symbol, input.market);
+        return await upsertHolding(input.symbol, market, input.shares, input.avgCost, input.note);
+      }),
+
+    remove: publicProcedure
+      .input(z.object({ password: z.string(), symbol: z.string().min(1).max(10) }))
+      .mutation(async ({ input }) => {
+        assertPortfolioPassword(input.password);
+        await removeHolding(input.symbol);
+        return { success: true };
+      }),
+  }),
 
   getIndustryIndices: publicProcedure
     .query(async () => {
