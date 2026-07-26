@@ -209,14 +209,15 @@ export async function getAnalysisById(
   }
 }
 
-// ---- 我的庫存（手動輸入持股）----
+// ---- 我的庫存（手動輸入持股，每筆 = 一筆買入交易）----
 export type Holding = {
   id: number;
   userId: number;
   symbol: string;
   market: string;
   shares: number;    // 股數（1 張 = 1000 股）
-  avgCost: number;   // 平均成本（每股）
+  avgCost: number;   // 買入成本（每股）
+  buyDate: string;   // 買入日期 YYYY-MM-DD
   note?: string;
   addedAt: string;
   updatedAt: string;
@@ -229,63 +230,55 @@ export async function getHoldings(): Promise<Holding[]> {
     const obj = await getBucket().get(HOLDINGS_KEY);
     if (!obj) return [];
     const arr = (await obj.json<Holding[]>()) as Holding[];
-    return arr.filter((h) => h.userId === DEFAULT_USER);
+    return arr
+      .filter((h) => h.userId === DEFAULT_USER)
+      .map((h) => ({ ...h, buyDate: h.buyDate || String(h.addedAt || "").slice(0, 10) })); // 舊資料無 buyDate → 用建立日
   } catch (e) {
     console.error("[R2] getHoldings failed", e);
     return [];
   }
 }
 
-/** 新增或更新持股（同 symbol 覆寫股數/成本） */
-export async function upsertHolding(
+/** 新增一筆買入紀錄（同 symbol 不覆寫，逐筆累加；前端負責彙總） */
+export async function addHolding(
   symbol: string,
   market: string,
   shares: number,
   avgCost: number,
+  buyDate: string,
   note?: string
 ): Promise<Holding> {
   const bucket = getBucket();
   const obj = await bucket.get(HOLDINGS_KEY);
   const list: Holding[] = obj ? ((await obj.json()) as Holding[]) : [];
-  const up = symbol.toUpperCase();
   const now = nowISO();
-  const existing = list.find((h) => h.userId === DEFAULT_USER && h.symbol === up);
-  let rec: Holding;
-  if (existing) {
-    existing.shares = shares;
-    existing.avgCost = avgCost;
-    existing.market = market;
-    existing.note = note;
-    existing.updatedAt = now;
-    rec = existing;
-  } else {
-    rec = {
-      id: list.length ? Math.max(...list.map((h) => h.id)) + 1 : 1,
-      userId: DEFAULT_USER,
-      symbol: up,
-      market,
-      shares,
-      avgCost,
-      note,
-      addedAt: now,
-      updatedAt: now,
-    };
-    list.push(rec);
-  }
+  const rec: Holding = {
+    id: list.length ? Math.max(...list.map((h) => h.id)) + 1 : 1,
+    userId: DEFAULT_USER,
+    symbol: symbol.toUpperCase(),
+    market,
+    shares,
+    avgCost,
+    buyDate: buyDate || now.slice(0, 10),
+    note,
+    addedAt: now,
+    updatedAt: now,
+  };
+  list.push(rec);
   await bucket.put(HOLDINGS_KEY, JSON.stringify(list));
   return rec;
 }
 
-export async function removeHolding(symbol: string): Promise<void> {
+/** 依 id 刪除單筆買入紀錄 */
+export async function removeHolding(id: number): Promise<void> {
   try {
     const bucket = getBucket();
     const obj = await bucket.get(HOLDINGS_KEY);
     if (!obj) return;
     const list: Holding[] = (await obj.json()) as Holding[];
-    const up = symbol.toUpperCase();
     await bucket.put(
       HOLDINGS_KEY,
-      JSON.stringify(list.filter((h) => !(h.userId === DEFAULT_USER && h.symbol === up)))
+      JSON.stringify(list.filter((h) => !(h.userId === DEFAULT_USER && h.id === id)))
     );
   } catch (e) {
     console.error("[R2] removeHolding failed", e);

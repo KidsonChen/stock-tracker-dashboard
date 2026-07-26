@@ -12,7 +12,7 @@ import {
   listAnalysisHistory,
   getAnalysisById,
   getHoldings,
-  upsertHolding,
+  addHolding,
   removeHolding,
 } from "./db-r2";
 import { getShareholding as fetchTdccShareholding } from "./tdcc";
@@ -552,10 +552,12 @@ export const appRouter = router({
           return { ...h, currentPrice, cost, marketValue, pnl, pnlPct };
         })
       );
+      // 買入日期新→舊排序
+      enriched.sort((a, b) => (b.buyDate || "").localeCompare(a.buyDate || "") || b.id - a.id);
       return enriched;
     }),
 
-    upsert: publicProcedure
+    add: publicProcedure
       .input(
         z.object({
           password: z.string(),
@@ -563,20 +565,21 @@ export const appRouter = router({
           market: z.string().optional(),
           shares: z.number().positive(),
           avgCost: z.number().nonnegative(),
+          buyDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "日期格式 YYYY-MM-DD"),
           note: z.string().max(100).optional(),
         })
       )
       .mutation(async ({ input }) => {
         assertPortfolioPassword(input.password);
         const market = inferMarket(input.symbol, input.market);
-        return await upsertHolding(input.symbol, market, input.shares, input.avgCost, input.note);
+        return await addHolding(input.symbol, market, input.shares, input.avgCost, input.buyDate, input.note);
       }),
 
     remove: publicProcedure
-      .input(z.object({ password: z.string(), symbol: z.string().min(1).max(10) }))
+      .input(z.object({ password: z.string(), id: z.number().int().positive() }))
       .mutation(async ({ input }) => {
         assertPortfolioPassword(input.password);
-        await removeHolding(input.symbol);
+        await removeHolding(input.id);
         return { success: true };
       }),
   }),
