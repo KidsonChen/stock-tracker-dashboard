@@ -320,6 +320,8 @@ const computeBackoffDelay = (
   return Math.min(Math.max(jittered, retryAfterMs ?? 0), RETRY_MAX_DELAY_MS);
 };
 
+const LLM_REQUEST_TIMEOUT_MS = 60000;
+
 const fetchWithBackoff = async (
   url: string,
   init: FetchInit,
@@ -331,9 +333,9 @@ const fetchWithBackoff = async (
     try {
       const response = await fetch(url, {
         ...init,
-        // 單次請求 25s 超時，避免 OpenRouter 卡住時 fetch 永遠掛起
+        // 單次請求 60s 超時，避免 OpenRouter 卡住時 fetch 永遠掛起
         // （Cloudflare Workers 環境出口到外部 LLM 有時會無回應，必須有 timeout）
-        signal: (init as any).signal ?? AbortSignal.timeout(25000),
+        signal: (init as any).signal ?? AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS),
         headers: {
           ...(init.headers ?? {}),
           authorization: `Bearer ${apiKey}`,
