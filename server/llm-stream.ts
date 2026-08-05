@@ -28,7 +28,7 @@ export async function* streamLLMAnalysis(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      model: ENV.routerAiModel || "openrouter/auto",
+      model: "openrouter/free",
       max_tokens: 2500,
     });
 
