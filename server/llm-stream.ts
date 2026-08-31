@@ -20,7 +20,8 @@ export interface StreamChunk {
  */
 export async function* streamLLMAnalysis(
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  model?: string
 ): AsyncGenerator<StreamChunk> {
   try {
     const response = await invokeLLM({
@@ -28,7 +29,8 @@ export async function* streamLLMAnalysis(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      model: "openrouter/free",
+      // 未指定 model 時交由 invokeLLM 內部 fallback（ENV.routerAiModel，預設 openrouter/free）
+      model: model || undefined,
       max_tokens: 2500,
     });
 
@@ -195,7 +197,8 @@ export async function* streamDetailedAnalysis(
   low: number,
   candleData?: CandleData[],
   companyName?: string,
-  marketLabel?: string
+  marketLabel?: string,
+  model?: string
 ): AsyncGenerator<StreamChunk> {
   try {
     const mkt = marketLabel || "台股";
@@ -219,7 +222,7 @@ ${data.technicalText ? `以下為系統計算的【真實技術指標數據】�
 4. 量價關係（量比所反映的資金態度）
 5. 技術面小結：偏多 / 中性 / 偏空，以及理由`;
 
-    for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, technicalPrompt)) {
+    for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, technicalPrompt, model)) {
       if (chunk.type === "complete") yield { type: "section_end" };
       else yield chunk;
     }
@@ -237,7 +240,7 @@ ${data.fundamentalText ? `以下為【真實基本面數據】（來源：公開
 3. 估值水位（本益比/股價淨值比/殖利率 vs 產業常態）
 4. 基本面小結：成長性與估值是否匹配`;
 
-    for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, fundamentalPrompt)) {
+    for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, fundamentalPrompt, model)) {
       if (chunk.type === "complete") yield { type: "section_end" };
       else yield chunk;
     }
@@ -257,7 +260,7 @@ ${data.chipsText}
 3. 槓桿情緒（融資融券餘額反映的市場心理）
 4. 籌碼面小結：籌碼趨向集中或分散、對股價的支撐/壓力意涵`;
 
-      for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, chipsPrompt)) {
+      for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, chipsPrompt, model)) {
         if (chunk.type === "complete") yield { type: "section_end" };
         else yield chunk;
       }
@@ -283,7 +286,7 @@ ${[data.technicalText, data.fundamentalText, data.chipsText].filter(Boolean).joi
 4. 操作策略建議：積極型 vs 保守型投資人分別如何應對
 5. 結尾附上「本分析僅供參考，非投資建議」`;
 
-    for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, summaryPrompt)) {
+    for await (const chunk of streamLLMAnalysis(SYSTEM_PROMPT, summaryPrompt, model)) {
       if (chunk.type === "complete") yield { type: "section_end" };
       else yield chunk;
     }

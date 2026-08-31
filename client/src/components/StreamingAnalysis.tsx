@@ -1,9 +1,17 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, RefreshCw, History } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Streamdown } from "streamdown";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface StreamingAnalysisProps {
   symbol: string;
@@ -23,6 +31,25 @@ interface StreamChunk {
   message?: string;
 }
 
+// ═══════════════════════════════════════════════════════════
+// 免費模型下拉選單
+// ═══════════════════════════════════════════════════════════
+
+/** Select 哨兵值：代表「使用後端預設模型」（不傳 model 給後端） */
+const DEFAULT_MODEL_VALUE = "__default__";
+const MODEL_STORAGE_KEY = "ai-analysis-model";
+
+/** 內建免費模型清單（OpenRouter :free 系列）：動態清單載入失敗/為空時的 fallback */
+const FALLBACK_FREE_MODELS: { id: string; name: string }[] = [
+  { id: "deepseek/deepseek-chat-v3.1:free", name: "DeepSeek V3.1" },
+  { id: "deepseek/deepseek-r1-0528:free", name: "DeepSeek R1（推理）" },
+  { id: "google/gemini-2.0-flash-exp:free", name: "Gemini 2.0 Flash" },
+  { id: "qwen/qwen3-235b-a22b:free", name: "Qwen3 235B" },
+  { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B" },
+  { id: "mistralai/mistral-small-3.2-24b-instruct:free", name: "Mistral Small 3.2" },
+  { id: "openai/gpt-oss-20b:free", name: "GPT-OSS 20B" },
+];
+
 export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [sections, setSections] = useState<AnalysisSection[]>([]);
@@ -33,6 +60,23 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
   const [showHistory, setShowHistory] = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 目前選擇的免費模型（localStorage 記住上次選擇）
+  const [modelValue, setModelValue] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem(MODEL_STORAGE_KEY) || DEFAULT_MODEL_VALUE;
+    } catch {
+      return DEFAULT_MODEL_VALUE;
+    }
+  });
+  const handleModelChange = (v: string) => {
+    setModelValue(v);
+    try {
+      window.localStorage.setItem(MODEL_STORAGE_KEY, v);
+    } catch {
+      /* localStorage 不可用時忽略 */
+    }
+  };
 
   // 歷史紀錄清單（展開時才查）
   const { data: historyData, refetch: refetchHistory } = trpc.analysis.listHistory.useQuery(
@@ -57,6 +101,21 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
     }
   }, [historyItem, selectedHistoryId]);
 
+  // 免費模型清單：動態載入（後端 10 分鐘快取），失敗/為空時用內建 fallback
+  const { data: freeModelsData } = trpc.analysis.listFreeModels.useQuery(undefined, {
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
+  });
+  const modelOptions = useMemo(() => {
+    const dynamic = (freeModelsData ?? []) as { id: string; name: string }[];
+    const seen = new Set<string>();
+    return [...dynamic, ...FALLBACK_FREE_MODELS].filter((m) => {
+      if (!m?.id || seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [freeModelsData]);
+
   // 透過 SSE（/api/analysis-stream）讀取串流分析
   const runAnalysis = async (force: boolean) => {
     setIsAnalyzing(true);
@@ -71,11 +130,19 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
     const ac = new AbortController();
     abortRef.current = ac;
 
+    // 選「預設模型」時不傳 model，由後端 ENV 決定
+    const selectedModel = modelValue !== DEFAULT_MODEL_VALUE ? modelValue : undefined;
+
     try {
       const res = await fetch("/api/analysis-stream", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ symbol, market: market ?? "TW", forceRefresh: force }),
+        body: JSON.stringify({
+          symbol,
+          market: market ?? "TW",
+          forceRefresh: force,
+          model: selectedModel,
+        }),
         signal: ac.signal,
       });
 
@@ -196,6 +263,35 @@ export function StreamingAnalysis({ symbol, market }: StreamingAnalysisProps) {
       <div className="flex justify-between items-center mb-4 gap-2 flex-wrap">
         <h2 className="text-lg font-bold">[ AI 詳細分析 ]</h2>
         <div className="flex items-center gap-2">
+          {/* 免費模型選擇 */}
+          <Select
+            value={modelValue}
+            onValueChange={handleModelChange}
+            disabled={isAnalyzing}
+          >
+            <SelectTrigger
+              size="sm"
+              className="w-[180px] text-xs"
+              title="選擇 AI 分析使用的免費模型"
+            >
+              <SelectValue placeholder="選擇免費模型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DEFAULT_MODEL_VALUE} className="text-xs">
+                預設模型（後端設定）
+              </SelectItem>
+              {modelOptions.length > 0 && (
+                <>
+                  <SelectSeparator />
+                  {modelOptions.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </>
+              )}
+            </SelectContent>
+          </Select>
           <Button
             onClick={() => handleStartAnalysis(sections.length > 0)}
             disabled={isAnalyzing}

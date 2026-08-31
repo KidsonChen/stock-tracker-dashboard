@@ -69,10 +69,11 @@ async function handleAnalysisStream(context: {
   } catch {
     body = {};
   }
-  const { symbol, market, forceRefresh } = body as {
+  const { symbol, market, forceRefresh, model } = body as {
     symbol?: string;
     market?: string;
     forceRefresh?: boolean;
+    model?: string;
   };
 
   if (!symbol) {
@@ -81,6 +82,11 @@ async function handleAnalysisStream(context: {
       headers: { "content-type": "application/json" },
     });
   }
+
+  // 安全防護：只接受「免費模型」（OpenRouter 慣例為 id 以 :free 結尾），
+  // 避免前端任意字串被用來呼叫付費模型產生費用。不合規則時退回後端預設模型。
+  const FREE_MODEL_RE = /^[a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.-]*:free$/i;
+  const safeModel = model && FREE_MODEL_RE.test(model) ? model : undefined;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -125,7 +131,8 @@ async function handleAnalysisStream(context: {
           0,
           undefined,
           undefined,
-          marketLabel
+          marketLabel,
+          safeModel
         )) {
           send(chunk);
           if (chunk.type === "text" && chunk.content) fullReport += chunk.content;

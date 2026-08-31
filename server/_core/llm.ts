@@ -479,6 +479,9 @@ export type ModelInfo = {
   object: string;
   created: number;
   owned_by: string;
+  /** OpenRouter 回傳的顯示名稱（如 "Meta: Llama 3.3 70B Instruct (free)"） */
+  name?: string;
+  context_length?: number;
 };
 
 export type ModelsResponse = {
@@ -496,7 +499,9 @@ export async function listLLMModels(): Promise<ModelsResponse> {
         ? ENV.forgeApiUrl
         : "https://openrouter.ai/api/v1";
 
-  const url = `${base.replace(/\/$/, "")}/v1/models`;
+  // 避免 /v1/v1/ 路徑（base 可能已含 /v1，如 https://openrouter.ai/api/v1）
+  const cleanBase = base.replace(/\/v1\/?$/, "");
+  const url = `${cleanBase}/v1/models`;
 
   const response = await fetchWithBackoff(
     url,

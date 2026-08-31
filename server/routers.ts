@@ -20,7 +20,7 @@ import { getTWSECandles, getTWSEQuote } from "./twse-live";
 import { getValuation, estimateOrderBook, getMargin, getForeignTrade, getIndustryIndices as fetchIndustryIndices } from "./twse-extra";
 import { getYahooCandles, getYahooQuote, getYahooValuation } from "./yahoo";
 import { TRPCError } from "@trpc/server";
-import { invokeLLM } from "./_core/llm";
+import { invokeLLM, listLLMModels } from "./_core/llm";
 import { fetchIndustryNews } from "./news";
 
 // 市場判斷：優先用前端傳入的 market，否則從 symbol 自動推斷（兜底，
@@ -43,6 +43,11 @@ function inferMarket(symbol: string, market?: string): string {
 // 台股代號淨化：證交所/FinMind 只認純數字（2330），去掉 Yahoo 風格的 .TW 後綴
 const cleanTaiwanSymbol = (symbol: string) =>
   symbol.replace(/\.TW$/i, "").toUpperCase();
+
+// 免費模型清單快取（記憶體內，10 分鐘）：避免每次展開下拉都打一次 /models API
+type FreeModelOption = { id: string; name: string };
+let freeModelsCache: { at: number; models: FreeModelOption[] } | null = null;
+const FREE_MODELS_TTL_MS = 10 * 60 * 1000;
 
 // 是否台股市場（依推斷結果）
 const isTaiwanMarket = (market: string) => market === "TW";
@@ -253,6 +258,37 @@ export const appRouter = router({
       .query(async () => {
         return { migrated: true, useEndpoint: "/api/analysis-stream" };
       }),
+
+    // 列出免費模型（OpenRouter 慣例：id 以 :free 結尾），供 AI 分析的下拉選單。
+    // 失敗時回傳空陣列，前端以內建清單 fallback，不中斷 UI。
+    listFreeModels: publicProcedure.query(async () => {
+      try {
+        if (
+          freeModelsCache &&
+          Date.now() - freeModelsCache.at < FREE_MODELS_TTL_MS
+        ) {
+          return freeModelsCache.models;
+        }
+        const res = await listLLMModels();
+        const models: FreeModelOption[] = (res.data || [])
+          .filter(
+            (m) =>
+              typeof m?.id === "string" &&
+              m.id.endsWith(":free") &&
+              m.id.includes("/")
+          )
+          .map((m) => ({
+            id: m.id,
+            name: m.name || m.id,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        freeModelsCache = { at: Date.now(), models };
+        return models;
+      } catch (error) {
+        console.error("[Analysis] listFreeModels failed:", error);
+        return [] as FreeModelOption[];
+      }
+    }),
 
     // 列出某股歷史分析紀錄（新→舊），供「歷史紀錄」下拉。快取 key 格式：SYMBOL:市場別
     listHistory: publicProcedure
