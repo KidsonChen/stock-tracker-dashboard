@@ -5,6 +5,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Send, RefreshCw, Sparkles } from "lucide-react";
 import { Streamdown } from "streamdown";
 import { trpc } from "@/lib/trpc";
+import {
+  DEFAULT_MODEL_VALUE,
+  FreeModelSelect,
+  useFreeModelSelection,
+} from "@/components/FreeModelSelect";
 
 const SUGGESTED = [
   "分析今天台股整體與半導體/記憶體/被動元件趨勢，以及部署策略",
@@ -23,6 +28,8 @@ export default function MacroPage() {
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [report, setReport] = useState("");
   const [fromCache, setFromCache] = useState(false);
+  // 目前選擇的免費模型（localStorage 記住上次選擇，與個股追蹤頁共用同一偏好）
+  const { modelValue, handleModelChange } = useFreeModelSelection();
 
   const macroMutation = trpc.analysis.macro.useMutation({
     onSuccess: (data) => {
@@ -41,7 +48,9 @@ export default function MacroPage() {
     setSubmittedQuery(q);
     setReport("");
     setFromCache(false);
-    macroMutation.mutate({ query: q, forceRefresh });
+    // 選「預設模型」時不傳 model，由後端 ENV 決定
+    const selectedModel = modelValue !== DEFAULT_MODEL_VALUE ? modelValue : undefined;
+    macroMutation.mutate({ query: q, forceRefresh, model: selectedModel });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -114,7 +123,7 @@ export default function MacroPage() {
 
         {/* AI 生成內容 */}
         <Card className="bg-card border-border p-4">
-          <div className="flex justify-between items-center mb-3">
+          <div className="flex justify-between items-center mb-3 gap-2 flex-wrap">
             <h2 className="text-lg font-bold flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-primary" />
               [ AI 生成分析 ]
@@ -123,6 +132,12 @@ export default function MacroPage() {
               {fromCache && !isPending && (
                 <span className="text-xs text-chart-1">[ 快取結果 ]</span>
               )}
+              {/* 免費模型選擇 */}
+              <FreeModelSelect
+                value={modelValue}
+                onValueChange={handleModelChange}
+                disabled={isPending}
+              />
               <Button
                 onClick={() => submittedQuery && runQuery(submittedQuery, true)}
                 disabled={!submittedQuery || isPending}

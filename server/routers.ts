@@ -20,7 +20,7 @@ import { getTWSECandles, getTWSEQuote } from "./twse-live";
 import { getValuation, estimateOrderBook, getMargin, getForeignTrade, getIndustryIndices as fetchIndustryIndices } from "./twse-extra";
 import { getYahooCandles, getYahooQuote, getYahooValuation } from "./yahoo";
 import { TRPCError } from "@trpc/server";
-import { invokeLLM, listLLMModels } from "./_core/llm";
+import { invokeLLM, listLLMModels, FREE_MODEL_RE } from "./_core/llm";
 import { fetchIndustryNews } from "./news";
 
 // 市場判斷：優先用前端傳入的 market，否則從 symbol 自動推斷（兜底，
@@ -321,7 +321,14 @@ export const appRouter = router({
 
     // 宏觀儀表板分析：自然語言查詢 → 生成「大盤/產業燈號/自選股/訊號」，快取 type=macro
     macro: publicProcedure
-      .input(z.object({ query: z.string().min(1).max(500), forceRefresh: z.boolean().optional() }))
+      .input(
+        z.object({
+          query: z.string().min(1).max(500),
+          // 選用的免費模型（OpenRouter :free 系列）：後端會再做 FREE_MODEL_RE 白名單驗證
+          model: z.string().max(200).optional(),
+          forceRefresh: z.boolean().optional(),
+        })
+      )
       .mutation(async ({ input }) => {
         try {
           const cacheKey = `MACRO:${input.query.trim()}`;
@@ -350,11 +357,17 @@ export const appRouter = router({
           const userPrompt =
             `使用者查詢：「${input.query}」\n\n目前自選股清單：${wlSymbols}\n\n請據此生成宏觀分析報告。`;
 
+          // 安全防護：只接受「免費模型」（OpenRouter 慣例為 id 以 :free 結尾），
+          // 避免前端任意字串被用來呼叫付費模型產生費用。不合規則時退回後端預設模型。
+          const safeModel =
+            input.model && FREE_MODEL_RE.test(input.model) ? input.model : undefined;
+
           const response = await invokeLLM({
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },
             ],
+            model: safeModel,
           });
 
           const result =

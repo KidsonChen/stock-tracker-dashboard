@@ -113,6 +113,13 @@ export type ResponseFormat =
   | { type: "json_object" }
   | { type: "json_schema"; json_schema: JsonSchema };
 
+/**
+ * 免費模型 id 安全驗證（OpenRouter 慣例為 id 以 :free 結尾）：
+ * 只接受「provider/model:free」格式，避免前端任意字串被用來呼叫付費模型產生費用。
+ * tRPC（analysis.macro）與 SSE（/api/analysis-stream）等後端路徑共用此規則。
+ */
+export const FREE_MODEL_RE = /^[a-z0-9][a-z0-9_.-]*\/[a-z0-9][a-z0-9_.-]*:free$/i;
+
 const ensureArray = (
   value: MessageContent | MessageContent[]
 ): MessageContent[] => (Array.isArray(value) ? value : [value]);
