@@ -15,6 +15,7 @@ import {
   addHolding,
   removeHolding,
 } from "./db-r2";
+import { computePortfolio, estimateFee } from "../shared/portfolio";
 import { getShareholding as fetchTdccShareholding } from "./tdcc";
 import { getTWSECandles, getTWSEQuote } from "./twse-live";
 import { getValuation, estimateOrderBook, getMargin, getForeignTrade, getIndustryIndices as fetchIndustryIndices } from "./twse-extra";
@@ -578,33 +579,62 @@ export const appRouter = router({
       .query(async ({ input }) => {
         assertPortfolioPassword(input.password);
         const list = await getHoldings();
-      // 為每筆持股抓即時報價算損益（單檔失敗不影響整體）
-      const enriched = await Promise.all(
-        list.map(async (h) => {
-          let currentPrice: number | null = null;
-          try {
-            const mkt = inferMarket(h.symbol, h.market);
-            if (isTaiwanMarket(mkt)) {
-              const q = await getTWSEQuote(cleanTaiwanSymbol(h.symbol));
-              currentPrice = Number(q.currentPrice) || null;
-            } else {
-              const q = await getYahooQuote(h.symbol);
-              currentPrice = Number(q.currentPrice) || null;
+
+        // 依 symbol 去重抓即時報價（同檔多筆交易只打一次，單檔失敗不影響整體）
+        const symbols = Array.from(new Set(list.map((h) => h.symbol.toUpperCase())));
+        const quoteMap = new Map<string, number | null>();
+        await Promise.all(
+          symbols.map(async (s) => {
+            try {
+              const h = list.find((x) => x.symbol.toUpperCase() === s)!;
+              const mkt = inferMarket(h.symbol, h.market);
+              let price: number | null = null;
+              if (isTaiwanMarket(mkt)) {
+                const q = await getTWSEQuote(cleanTaiwanSymbol(h.symbol));
+                price = Number(q.currentPrice) || null;
+              } else {
+                const q = await getYahooQuote(h.symbol);
+                price = Number(q.currentPrice) || null;
+              }
+              quoteMap.set(s, price);
+            } catch (e) {
+              console.error(`[Holdings] quote failed for ${s}:`, (e as Error).message);
+              quoteMap.set(s, null);
             }
-          } catch (e) {
-            console.error(`[Holdings] quote failed for ${h.symbol}:`, (e as Error).message);
-          }
-          const cost = h.shares * h.avgCost;
-          const marketValue = currentPrice != null ? h.shares * currentPrice : null;
-          const pnl = marketValue != null ? marketValue - cost : null;
-          const pnlPct = pnl != null && cost > 0 ? (pnl / cost) * 100 : null;
-          return { ...h, currentPrice, cost, marketValue, pnl, pnlPct };
-        })
-      );
-      // 買入日期新→舊排序
-      enriched.sort((a, b) => (b.buyDate || "").localeCompare(a.buyDate || "") || b.id - a.id);
-      return enriched;
-    }),
+          })
+        );
+
+        // 指定批次結算：批次剩餘、含手續費均價、賣出已實現損益
+        const pf = computePortfolio(list);
+        const lotById = new Map(pf.lots.map((l) => [l.lotId, l]));
+        const sellByTx = new Map(pf.sellCalcs.map((s) => [s.txId, s]));
+
+        const enriched = list.map((h) => {
+          const currentPrice = quoteMap.get(h.symbol.toUpperCase()) ?? null;
+          const lot = h.type !== "sell" ? lotById.get(h.id) : undefined;
+          const sell = h.type === "sell" ? sellByTx.get(h.id) : undefined;
+          const remaining = lot ? lot.remaining : null; // 買入批次剩餘股數
+          const perShareCost = lot ? lot.perShareCost : null; // 含攤入手續費的每股成本
+          const cost = lot ? lot.remainingCost : null; // 剩餘成本基礎
+          const marketValue = lot && currentPrice != null ? lot.remaining * currentPrice : null;
+          const pnl = marketValue != null && cost != null ? marketValue - cost : null;
+          const pnlPct = pnl != null && cost != null && cost > 0 ? (pnl / cost) * 100 : null;
+          return {
+            ...h,
+            currentPrice,
+            remaining,
+            perShareCost,
+            realizedPnl: sell ? sell.realizedPnl : null, // 僅賣出有值
+            cost,
+            marketValue,
+            pnl,
+            pnlPct,
+          };
+        });
+        // 交易日期新→舊排序
+        enriched.sort((a, b) => (b.buyDate || "").localeCompare(a.buyDate || "") || b.id - a.id);
+        return enriched;
+      }),
 
     add: publicProcedure
       .input(
@@ -615,19 +645,88 @@ export const appRouter = router({
           shares: z.number().positive(),
           avgCost: z.number().nonnegative(),
           buyDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "日期格式 YYYY-MM-DD"),
+          fee: z.number().nonnegative().optional(), // 未傳時依市場自動試算
           note: z.string().max(100).optional(),
         })
       )
       .mutation(async ({ input }) => {
         assertPortfolioPassword(input.password);
         const market = inferMarket(input.symbol, input.market);
-        return await addHolding(input.symbol, market, input.shares, input.avgCost, input.buyDate, input.note);
+        const fee =
+          input.fee ?? estimateFee({ market, side: "buy", shares: input.shares, price: input.avgCost });
+        return await addHolding({
+          symbol: input.symbol,
+          market,
+          type: "buy",
+          shares: input.shares,
+          avgCost: input.avgCost,
+          fee,
+          buyDate: input.buyDate,
+          note: input.note,
+        });
+      }),
+
+    // 賣出（指定批次：從某筆買入扣，成本最精確）
+    sell: publicProcedure
+      .input(
+        z.object({
+          password: z.string(),
+          symbol: z.string().min(1).max(10),
+          fromLotId: z.number().int().positive(),
+          shares: z.number().positive(),
+          price: z.number().positive(),
+          sellDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "日期格式 YYYY-MM-DD"),
+          fee: z.number().nonnegative().optional(), // 未傳時依市場自動試算（台股含 0.3% 證交稅）
+          note: z.string().max(100).optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        assertPortfolioPassword(input.password);
+        const symbol = input.symbol.toUpperCase();
+        const list = await getHoldings();
+        const pf = computePortfolio(list);
+        const lot = pf.lots.find((l) => l.lotId === input.fromLotId && l.symbol === symbol);
+        if (!lot) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "找不到對應的買入批次" });
+        }
+        if (input.shares > lot.remaining) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `賣出股數超過該批次剩餘（剩餘 ${(lot.remaining / 1000).toLocaleString("zh-TW", { maximumFractionDigits: 3 })} 張）`,
+          });
+        }
+        const market = inferMarket(symbol, lot.market);
+        const fee =
+          input.fee ?? estimateFee({ market, side: "sell", shares: input.shares, price: input.price });
+        return await addHolding({
+          symbol,
+          market,
+          type: "sell",
+          shares: input.shares,
+          avgCost: input.price,
+          fee,
+          buyDate: input.sellDate,
+          fromLotId: input.fromLotId,
+          note: input.note,
+        });
       }),
 
     remove: publicProcedure
       .input(z.object({ password: z.string(), id: z.number().int().positive() }))
       .mutation(async ({ input }) => {
         assertPortfolioPassword(input.password);
+        // 刪除保護：已被賣出引用的買入批次不可刪（否則賣出的成本基礎會失真）
+        const list = await getHoldings();
+        const target = list.find((h) => h.id === input.id);
+        if (target && target.type !== "sell") {
+          const referenced = list.some((h) => h.type === "sell" && h.fromLotId === input.id);
+          if (referenced) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "此買入批次已有賣出紀錄引用，請先刪除相關賣出紀錄",
+            });
+          }
+        }
         await removeHolding(input.id);
         return { success: true };
       }),

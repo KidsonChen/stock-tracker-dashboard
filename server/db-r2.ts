@@ -209,15 +209,19 @@ export async function getAnalysisById(
   }
 }
 
-// ---- 我的庫存（手動輸入持股，每筆 = 一筆買入交易）----
+// ---- 我的庫存（交易紀錄：每筆 = 一筆買入或賣出）----
+// 舊資料相容：type 缺省 = "buy"、fee 缺省 = 0（由 getHoldings 正規化補齊）。
 export type Holding = {
   id: number;
   userId: number;
   symbol: string;
   market: string;
-  shares: number;    // 股數（1 張 = 1000 股）
-  avgCost: number;   // 買入成本（每股）
-  buyDate: string;   // 買入日期 YYYY-MM-DD
+  type: "buy" | "sell";  // 交易類型
+  shares: number;    // 股數（1 張 = 1000 股）；賣出時 = 賣出股數
+  avgCost: number;   // 成交單價（買＝買價、賣＝賣價）
+  fee: number;       // 該筆手續費（買入會攤入成本；賣出從收入扣除）
+  fromLotId?: number; // 賣出專屬：從哪筆買入批次扣（= 買入紀錄的 id）
+  buyDate: string;   // 交易日期 YYYY-MM-DD（賣出紀錄存賣出日）
   note?: string;
   addedAt: string;
   updatedAt: string;
@@ -232,22 +236,30 @@ export async function getHoldings(): Promise<Holding[]> {
     const arr = (await obj.json<Holding[]>()) as Holding[];
     return arr
       .filter((h) => h.userId === DEFAULT_USER)
-      .map((h) => ({ ...h, buyDate: h.buyDate || String(h.addedAt || "").slice(0, 10) })); // 舊資料無 buyDate → 用建立日
+      .map((h) => ({
+        ...h,
+        type: h.type ?? "buy", // 舊資料無 type → 買入
+        fee: h.fee ?? 0, // 舊資料無 fee → 0
+        buyDate: h.buyDate || String(h.addedAt || "").slice(0, 10), // 舊資料無 buyDate → 用建立日
+      }));
   } catch (e) {
     console.error("[R2] getHoldings failed", e);
     return [];
   }
 }
 
-/** 新增一筆買入紀錄（同 symbol 不覆寫，逐筆累加；前端負責彙總） */
-export async function addHolding(
-  symbol: string,
-  market: string,
-  shares: number,
-  avgCost: number,
-  buyDate: string,
-  note?: string
-): Promise<Holding> {
+/** 新增一筆交易紀錄（買入/賣出；同 symbol 不覆寫，逐筆累加；前端負責彙總） */
+export async function addHolding(input: {
+  symbol: string;
+  market: string;
+  type: "buy" | "sell";
+  shares: number;
+  avgCost: number;
+  fee: number;
+  buyDate: string;
+  fromLotId?: number;
+  note?: string;
+}): Promise<Holding> {
   const bucket = getBucket();
   const obj = await bucket.get(HOLDINGS_KEY);
   const list: Holding[] = obj ? ((await obj.json()) as Holding[]) : [];
@@ -255,12 +267,15 @@ export async function addHolding(
   const rec: Holding = {
     id: list.length ? Math.max(...list.map((h) => h.id)) + 1 : 1,
     userId: DEFAULT_USER,
-    symbol: symbol.toUpperCase(),
-    market,
-    shares,
-    avgCost,
-    buyDate: buyDate || now.slice(0, 10),
-    note,
+    symbol: input.symbol.toUpperCase(),
+    market: input.market,
+    type: input.type,
+    shares: input.shares,
+    avgCost: input.avgCost,
+    fee: input.fee,
+    fromLotId: input.type === "sell" ? input.fromLotId : undefined,
+    buyDate: input.buyDate || now.slice(0, 10),
+    note: input.note,
     addedAt: now,
     updatedAt: now,
   };
